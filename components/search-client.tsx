@@ -48,13 +48,13 @@ export function SearchClient({ posts }: { posts: Post[] }) {
           <Link
             key={post.slug}
             href={`/blog/${post.slug}`}
-            className="group rounded-[var(--radius)] border bg-card/70 p-5 transition-colors hover:border-accent/60"
+            className="group rounded-md border bg-card p-5 transition-colors hover:border-accent/60"
           >
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               <span>{post.category}</span>
-              <span className="size-1 rounded-full bg-muted-foreground/40" />
+              <span className="h-px w-4 bg-border" />
               <time dateTime={post.date}>{formatDate(post.date)}</time>
-              <span className="size-1 rounded-full bg-muted-foreground/40" />
+              <span className="h-px w-4 bg-border" />
               <span>{post.readingTime}</span>
             </div>
             <h2 className="mt-3 text-xl font-semibold tracking-normal group-hover:text-accent">

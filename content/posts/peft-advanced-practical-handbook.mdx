@@ -1,0 +1,1772 @@
+---
+title: "PEFT 进阶实战手册"
+description: "围绕 PEFT 工程实战和面试准备，深入拆解 LoRA、QLoRA、P-Tuning、LLaMA-Factory、多 LoRA 推理与训练排错。"
+date: "2026-05-30"
+category: "学习文档"
+tags: ["PEFT", "LoRA", "面试准备", "工程实践"]
+author: "Feishu Knowledge Base"
+---
+# 参数高效微调（PEFT）进阶实战手册
+
+> **适用场景：** 多模态目标检测 / CV 大模型微调面试准备 + 工程实战  
+> **工作空间：** `/home/sunlupeng/my-projects/实习/微调`  
+> **前置要求：** 熟悉 Transformer 架构、PyTorch 基础、HuggingFace 生态
+
+---
+
+## 目录
+
+1. 引言：为什么需要参数高效微调
+2. LoRA 微调技术（核心重点）
+
+   - 2.1 数学原理推导
+   - 2.2 "手撕代码"专项：LoRA From Scratch
+   - 2.3 peft 系统实操
+3. P-Tuning 微调技术（核心重点）
+
+   - 3.1 架构改造原理
+   - 3.2 P-Tuning v1 vs v2
+4. QLoRA 微调技术（核心重点）
+
+   - 4.1 NF4 量化原理
+   - 4.2 双重量化与分页优化器
+   - 4.3 QLoRA + LoRA 联合机制
+5. IA3 微调技术（了解即可）
+6. LLaMA-Factory 系统实操
+
+   - 6.1 系统核心优势
+   - 6.2 完整微调任务实战
+7. 面试高频考点总结
+
+---
+
+## 1. 引言：为什么需要参数高效微调
+
+### 1.1 从全量微调到 PEFT 的演化
+
+在 BERT 时代（2018-2019），全量微调（Full Fine-Tuning）几乎是 NLP 下游任务的唯一范式：拿一个百兆量级的预训练模型，挂上任务头，端到端地用任务数据训几个 epoch。彼时的"全量微调"成本可控——参数量在 1 亿以内，单张 V100 即可应对。然而进入大模型时代（GPT-3 / LLaMA / Qwen），单一模型规模冲到 7B、13B、70B，传统的"全量微调"路线在工程上彻底走不通了。
+
+全量微调（Full Fine-Tuning）一个 7B 参数的 LLM 需要约 56 GB 显存（仅模型参数 + 优化器状态），而消费级 GPU（RTX 3090/4090）仅有 24 GB。PEFT 的核心思想是：**冻结预训练模型的主体参数，仅训练极少量的新增参数或对特定层的少量参数进行适配**，从而将显存需求降低 1-2 个数量级，同时在下游任务上达到接近全量微调的效果。
+
+PEFT 这条路线之所以能"以小博大"，并不是简单的"训练更少的参数"那么粗糙。它背后有两条深刻的实证规律支撑：第一，预训练大模型已经在亿级语料上学到了非常通用的语言/视觉表征，下游任务往往只需"轻微调整"而非"重新学习"；第二，下游任务对模型参数空间的修改往往集中在一个极低维度的子空间内，整个模型的"任务适配方向"是稀疏的。这两条规律为 LoRA 的"低秩假说"、P-Tuning 的"少量软提示足够"、IA3 的"逐元素缩放足够"提供了共同的理论支撑。
+
+### 1.2 显存账本：为什么 56 GB 装不进 24 GB
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+把 7B 模型在 FP16 精度下做全量微调的显存账本展开如下：
+
+| 显存项 | 计算 | 数值 |
+|-|-|-|
+| ① 模型权重 (FP16) | $7 \text{B} \times 2$ byte | 14 GB |
+| ② 反向梯度 (FP16) | 与权重同形 | 14 GB |
+| ③ Adam 优化器状态（一阶动量 m + 二阶动量 v，FP32） | $7\text{B} \times 4 \times 2$ byte | 56 GB |
+| ④ 激活值（取决于 batch × seq_len） | 经验值 | 6-10 GB |
+| **合计** |  | **\~90 GB** |
+
+PEFT 的"省"主要来自第 ② ③ 项：冻结的预训练权重不需要存梯度，更不需要 Adam 的 m/v 副本。当可训练参数只有原模型的 0.1% 时，第 ② ③ 项几乎归零，整体显存能从 90 GB 跌到 16-20 GB——这正是 24 GB 消费级显卡能跑微调的根本原因。
+
+### 1.3 PEFT 方法谱系与适用场景
+
+四种主流 PEFT 技术的参数规模对比：
+
+| 方法 | 可训练参数量 | 典型显存需求 (7B) |
+|-|-|-|
+| Full Fine-Tuning | 100% (7B) | \~56 GB |
+| LoRA | 0.1%-1% | \~16 GB |
+| QLoRA | 0.1%-1% | \~10 GB |
+| P-Tuning v2 | 0.1%-1% | \~18 GB |
+| IA3 | \~0.01% | \~14 GB |
+
+这张表只揭示了"参数量"维度，但工程选型时还要看其他维度：**任务复杂度、推理是否可合并、是否支持多任务并存、对模型规模的敏感性**。一句话总结：复杂业务、生成式任务、需要推理零延迟的场景优先 LoRA / QLoRA；中小模型上的 NLU 任务可考虑 P-Tuning v2；极简分类任务或参数预算极紧张时可用 IA3。后续每一章我们会展开这些权衡的细节。
+
+### 1.4 PEFT 与提示工程、ICL 的边界
+
+许多新人会困惑：既然提示工程（Prompt Engineering）和上下文学习（In-Context Learning, ICL）都能在不动模型的前提下"教会模型新任务"，为什么还要做 PEFT？三者的本质差异在于**修改对象**：
+
+- **提示工程**：修改的是输入的自然语言模板，模型与权重完全不动
+- **ICL**：在输入里加入若干示例，让模型靠注意力机制"现学现用"
+- **PEFT**：修改的是模型的参数（即便只是极少量），把知识"内化"到权重里
+
+工业实践中三者并不互斥：你完全可以先用提示工程做 POC，确认任务可解；再用 ICL 评估上限；最后用 PEFT 把成本压到最低、效果做到最稳。**PEFT 适合的是"高频、稳定、对延迟敏感"的生产场景**，而提示工程 / ICL 适合"低频、探索性、对延迟不敏感"的任务。
+
+---
+
+## 2. LoRA 微调技术（核心重点）
+
+### 2.1 数学原理推导
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+LoRA（Low-Rank Adaptation of Large Language Models）由微软研究院的 Hu 等人在 2021 年提出。论文中最重要的实验结论是：**用占原模型 0.01% 的参数，达到了与全量微调几乎相同（甚至略好）的效果**。这一结论一经发布即在开源社区引发地震，至今仍是大模型微调的事实标准。本节我们从假设出发，逐步推导出 LoRA 的前向公式、初始化、梯度流和合并规则。
+
+#### 2.1.1 核心假设：低秩分解假说
+
+LoRA（Low-Rank Adaptation）基于一个关键洞察：**预训练大模型在适配下游任务时，权重矩阵的更新** $\Delta W$ **是低秩的**。换言之，虽然权重矩阵 $W_0 \in \mathbb{R}^{d \times k}$ 本身是高秩的，但任务适配所需的增量 $\Delta W$ 可以被压缩到一个远小于 $\min(d, k)$ 的低秩子空间中。
+
+这个假设并非凭空想象，它的理论源头是 Aghajanyan 等人在 2020 年提出的 **"内在维度假说"（Intrinsic Dimension Hypothesis）**：当一个预训练模型适配下游任务时，其参数更新所在的有效维度远小于参数总数。论文用随机投影实验证明，BERT-base（1 亿参数）在多数 GLUE 任务上，仅需在约 200 维的随机子空间中优化就能达到不错的效果。LoRA 把这个假设进一步具象化——既然有效维度低，那直接学一个低秩矩阵就行了，不必依赖随机投影。
+
+从数学上看，LoRA 与经典的**奇异值分解（SVD）**有深刻联系。任何实矩阵 $\Delta W \in \mathbb{R}^{d \times k}$ 都可以唯一分解为 $\Delta W = U \Sigma V^\top$，其中 $\Sigma$ 是奇异值对角矩阵。**Eckart-Young 定理**告诉我们，在 Frobenius 范数意义下，$\Delta W$ 的最优秩-$r$ 近似就是取 $\Sigma$ 的前 $r$ 个奇异值。换句话说，如果 $\Delta W$ 在 SVD 后只有前若干个奇异值显著、其余近似为零，那么用 $BA$（其中 $B \in \mathbb{R}^{d \times r}, A \in \mathbb{R}^{r \times k}$）来逼近 $\Delta W$ 几乎不损失信息。LoRA 训练就是在用梯度下降"逼近"这个理论最优分解——不需要事先知道 $\Delta W$ 的真实秩，数据驱动地学出 $A, B$ 即可。
+
+#### 2.1.2 前向传播公式推导
+
+对于一个线性层 $h = W_0 x$（其中 $W_0 \in \mathbb{R}^{d \times k}$ 是冻结的预训练权重，$x \in \mathbb{R}^{k}$ 是输入向量），LoRA 的前向传播定义为：
+
+$$h = W_0 x + \Delta W x = W_0 x + BA x$$
+
+其中：
+
+$B \in \mathbb{R}^{d \times r}$：升维矩阵（Up-Projection Matrix）
+
+$A \in \mathbb{R}^{r \times k}$：降维矩阵（Down-Projection Matrix）
+
+$r \ll \min(d, k)$：秩（Rank），典型取值为 4、8、16、32、64
+
+引入缩放因子 $\alpha$ 后，完整公式为：
+
+$$h = W_0 x + \frac{\alpha}{r} \cdot BA x$$
+
+**为什么需要** $\alpha/r$**？** 缩放因子使超参数调优与 $r$ 解耦——当调整 $r$ 时，无需同步调整学习率。$\alpha$ 控制 LoRA 分支对原始输出的影响力强度，典型取值为 $r$ 的 1-2 倍。
+
+更细致地看，$\alpha/r$ 的引入还有一个数值稳定性上的考量：当 $r$ 增大时，$BA$ 的输出范数会自然增大（因为多了求和项），如果不做缩放，等于变相提升了学习率，容易引起梯度爆炸或训练发散。$\alpha/r$ 本质上是一种**预归一化**，把不同 $r$ 下的 LoRA 输出"拉到同一量级"。后来 rsLoRA（Rank-Stabilized LoRA, 2023）观察到当 $r$ 极大（>128）时，$\alpha/r$ 仍然不够稳定，于是改用 $\alpha/\sqrt{r}$ 作为缩放系数——这是 LoRA 后续演化中一个具有数学美感的改进点。
+
+#### 2.1.3 初始化策略
+
+$$A \sim \mathcal{N}(0, \sigma^2), \quad B = \mathbf{0}$$
+
+- **A 矩阵**：使用 Kaiming 均匀初始化或高斯初始化，确保初始前向传播时 $A x$ 有合理的方差。
+- **B 矩阵**：初始化为全零矩阵。这保证了训练开始时 $\Delta W = BA = \mathbf{0}$，模型行为与原始预训练模型完全一致，避免引入随机噪声破坏预训练知识。
+
+这个看似简单的初始化方案蕴含了 LoRA 设计的一个关键洞察：**冷启动时不破坏预训练知识比快速学习新任务更重要**。如果 $A, B$ 都用 Kaiming 初始化，训练第一步就会给模型注入一个非零的 $\Delta W$，这个 $\Delta W$ 是纯随机的噪声，会在 forward 中破坏模型的预训练表征。loss 会先经历一段"先变差再变好"的过程，浪费数百步训练。而 $B=0$ 的策略让模型从"完全等同于预训练模型"的起点开始训练，第一步只会朝着任务方向迈一小步，不会先走一段弯路。
+
+值得注意的是，社区也尝试过反过来的方案：$A = \mathbf{0}, B \sim \mathcal{N}$。这也能保证 $\Delta W = 0$ 起步。但实验表明这个方案训练初期梯度信号更弱，原因是 $A=0$ 时 $A$ 的梯度依赖于 $B^\top \cdot \nabla h \cdot x^\top$——而此时 $B$ 已经被随机初始化、$\nabla h$ 还没经过有效的反向传播，整体信号不稳定。"$B=0$ + $A$ 随机"这套组合是经过多次实验筛选出来的最优方案。
+
+#### 2.1.4 梯度流分析
+
+训练时仅 $A$ 和 $B$ 需要梯度，$W_0$ 冻结：
+
+$$\frac{\partial \mathcal{L}}{\partial A} = \frac{\alpha}{r} \cdot B^\top \frac{\partial \mathcal{L}}{\partial h} x^\top$$
+
+$$\frac{\partial \mathcal{L}}{\partial B} = \frac{\alpha}{r} \cdot \frac{\partial \mathcal{L}}{\partial h} (Ax)^\top$$
+
+由于 $A$ 和 $B$ 的参数量仅为 $r(d + k)$，远小于 $W_0$ 的 $d \times k$，梯度计算和优化器状态（Adam 的一阶/二阶动量）的显存开销大幅降低。
+
+仔细观察这两个梯度公式，可以发现一个有趣的不对称性：**训练初期** $B=0$ **时，**$A$ **的梯度恰好为零，但** $B$ **的梯度不为零**。这是因为 $\frac{\partial \mathcal{L}}{\partial A}$ 的表达式里有 $B^\top$ 作为因子，$B=0$ 直接把它截断了；而 $\frac{\partial \mathcal{L}}{\partial B}$ 的表达式依赖 $Ax$ 而非 $B$，所以即使 $B=0$ 也能正常计算。这种"$B$ 先动、$A$ 跟上"的级联训练模式，是 LoRA 训练初期 loss 下降相对平缓的根本原因。新人第一次跑 LoRA 看到 loss 在前 20-50 步几乎不动，不要怀疑代码错误——这是正常现象，等 $B$ 累积一定更新后 $A$ 的梯度就会被激活。
+
+从优化器状态的视角看，假设我们用 Adam 优化器：每个可训练参数需要 2 个 FP32 副本（一阶动量 m、二阶动量 v）。如果训练 7B 模型的全量微调，这部分占 $7\text{B} \times 4 \times 2 = 56$ GB。换成 LoRA r=16，可训练参数约 48M，Adam 状态降到 $48\text{M} \times 4 \times 2 \approx 0.4$ GB——**这就是 LoRA 比 Full FT 节省 100 倍以上显存的真正来源**。模型权重本身不变，节省的是"为冻结参数维护优化器状态"这部分。
+
+#### 2.1.5 推理时合并（Merge）
+
+推理阶段，可以将 LoRA 权重合并回原始权重，**完全消除额外推理延迟**：
+
+$$W_{\text{merged}} = W_0 + \frac{\alpha}{r} BA$$
+
+合并后，前向传播退化为标准的 $h = W_{\text{merged}} \, x$，与原始模型计算量完全一致。
+
+这一点在工程上意义重大。早期的 Adapter 方法（Houlsby et al., 2019）通过在 Transformer 子层后串联一个瓶颈 MLP 来实现参数高效微调，但串联结构意味着每次前向都要多算一次 down-projection + up-projection，引入约 5%-10% 的推理延迟。在生产部署中，这个延迟会随 QPS 放大成不可忽视的成本。LoRA 把 Adapter 的"串联"变成了"并联"，并且并联的两条路径都是线性变换——这就允许我们把它们的权重合并起来，得到一个等价但更简洁的单线性层。**LoRA 真正赢过 Adapter 的关键不是参数更少，而是这条"推理可合并"的工程通路**。
+
+合并操作的工程细节也值得展开。`PeftModel.merge_and_unload()` 内部会遍历所有 LoRA 层，计算 $\Delta W = \alpha/r \cdot BA$，然后用 `weight.data.add_(delta_w)` 原地修改原始权重的张量。这个操作是**不可逆的**——合并后的模型回不到独立的 $A, B$。如果你需要保留来回切换的能力，可以用 `merge_adapter()` 而非 `merge_and_unload()`，前者只是临时合并、保留 PEFT 包装，可以用 `unmerge_adapter()` 反向操作。生产部署时通常 `merge_and_unload`（性能优先），调试时通常用 `merge_adapter`（灵活性优先）。
+
+#### 2.1.6 参数量与计算量的精确分析
+
+LoRA 在一个 $d \times k$ 的线性层上引入的可训练参数为：
+
+$$|\theta_{\text{LoRA}}| = r \cdot (d + k)$$
+
+以 Qwen2-7B 为例（32 层，每层 7 个核心线性层，hidden_size=3584，intermediate_size=18944），$r=16$ 时的总参数量约 48M，占模型总量的 0.69%。**这个数字之所以重要，不仅是因为它决定了训练成本，更因为它决定了 LoRA 适配器文件的大小——48M 参数对应约 100MB 的 safetensors 文件，可以用邮件附件传输；而全量微调的 7B 模型每个 checkpoint 都是 14GB，分享和部署的成本完全不在一个量级**。这种"轻量化分发"能力是 LoRA 进入工业生产链条的关键卖点。
+
+至于推理时的计算量，LoRA 旁路引入了两次额外的矩阵乘法（$Ax$ 和 $B(Ax)$），但因为 $r$ 极小，这部分开销通常只占原始 $W_0 x$ 的 1%-2%。如果担心这点开销，merge 之后就完全没有了。
+
+#### 2.1.7 训练动力学：LoRA 为什么学得快
+
+实验中经常观察到一个现象：LoRA 训练的 loss 曲线比全量微调更陡峭，**前 1-2 个 epoch 就能达到接近全量微调最终的效果**。这背后有两个原因：第一，LoRA 训练的参数空间被强约束在低秩流形上，搜索空间小、优化路径短；第二，由于基座参数全部冻结，反向传播不需要穿过深层网络去更新底层参数，梯度信号"集中、清晰"，不容易被噪声稀释。
+
+这个特性在工程实践中带来了一个反直觉的建议：**LoRA 训练的 epochs 应该比全量微调少**。如果你习惯了全量微调跑 10 个 epoch，那 LoRA 通常 2-3 个就够，再多就开始过拟合了。社区还总结出一个经验法则：当训练集小于 1 万条时，LoRA 通常 3 epoch 见顶；超过 10 万条时，可以放心跑 1-2 epoch 就停。
+
+---
+
+### 2.2 "手撕代码"专项：LoRA From Scratch
+
+LoRA 是面试中最常考的"手撕代码"题目之一。面试官一般要求：(1) 不依赖任何第三方微调包，用纯 PyTorch 实现 LoRA 的核心机制；(2) 解释为什么 B 初始化为零、A 用 Kaiming 初始化；(3) 写出 forward 和 merge 两个核心方法；(4) 能在白板上估算可训练参数量。如果你能脱稿写出下面这段代码并清楚解释每个细节，基本能通过国内大厂大部分算法岗的"模型基础"轮。
+
+> 以下代码严格使用纯 PyTorch 实现，不依赖 peft / bitsandbytes 等第三方微调包。  
+> **面试考点**：能否脱稿写出 LoRA 的核心类及其 forward 逻辑。
+
+**文件路径：`/home/sunlupeng/my-projects/实习/微调/lora_from_scratch.py`**
+
+```Python
+import torch
+import torch.nn as nn
+import math
+
+
+class LoRALinear(nn.Module):
+    """
+    LoRA 线性层：纯 PyTorch 从零实现
+    包裹一个冻结的 nn.Linear 层，在其旁路添加低秩可训练分支。
+    
+    前向传播公式：h = W_0 @ x + (α / r) * B @ A @ x
+    """
+
+    def __init__(
+        self,
+        original_linear: nn.Linear,  # 被包裹的原始线性层（冻结）
+        r: int = 8,                   # 低秩分解的秩
+        alpha: int = 16,              # LoRA 缩放因子
+        dropout: float = 0.0,         # LoRA 分支的 dropout 概率
+    ):
+        super().__init__()
+        # ── 保存原始层的引用与维度信息 ──
+        self.original_linear = original_linear  # W_0，冻结不训练
+        self.r = r
+        self.alpha = alpha
+        self.scaling = alpha / r  # 缩放系数，使调参与 r 解耦
+
+        in_features = original_linear.in_features   # k
+        out_features = original_linear.out_features # d
+
+        # ── 降维矩阵 A：r × k，将输入从 k 维压缩到 r 维 ──
+        # 初始化：Kaiming Uniform（保证前向传播早期方差合理）
+        self.lora_A = nn.Parameter(torch.empty(r, in_features))
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+
+        # ── 升维矩阵 B：d × r，将低秩表示升维回 d 维 ──
+        # 初始化：全零（保证训练起始 ΔW = 0，与预训练模型行为一致）
+        self.lora_B = nn.Parameter(torch.zeros(out_features, r))
+
+        # ── 可选 Dropout ──
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+        # ── 冻结原始层参数 ──
+        self.original_linear.weight.requires_grad = False
+        if self.original_linear.bias is not None:
+            self.original_linear.bias.requires_grad = False
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # ── 分支 1：冻结的原始前向传播 W_0 @ x（无梯度计算） ──
+        frozen_out = self.original_linear(x)
+
+        # ── 分支 2：LoRA 旁路 ΔW @ x = B @ A @ x ──
+        # Step 1: x (batch, *, k) → A @ x^T → 降维到 r 维
+        # Step 2: 过 dropout
+        # Step 3: B 升维回 d 维
+        # 技巧：先算 x @ A^T，得到 (batch, *, r)，再算 @ B^T，得到 (batch, *, d)
+        lora_out = self.dropout(x) @ self.lora_A.T  # (..., r)
+        lora_out = lora_out @ self.lora_B.T          # (..., d)
+        lora_out = lora_out * self.scaling           # 乘以 α/r
+
+        # ── 合并两条分支 ──
+        return frozen_out + lora_out
+
+    def merge_weights(self) -> None:
+        """
+        将 LoRA 权重合并到原始权重中：W_merged = W_0 + (α/r) * B @ A
+        合并后推理时无需额外计算 LoRA 分支，完全消除推理延迟。
+        """
+        # 计算低秩增量矩阵：ΔW = B @ A，形状为 (d, k)
+        delta_w = self.lora_B @ self.lora_A  # (d, r) @ (r, k) → (d, k)
+        # 合并（原地修改原始权重）
+        self.original_linear.weight.data += self.scaling * delta_w
+
+    def unmerge_weights(self) -> None:
+        """
+        反向操作：从原始权重中分离 LoRA 权重。
+        用于需要继续训练或切换不同 LoRA 模块的场景。
+        """
+        delta_w = self.lora_B @ self.lora_A
+        self.original_linear.weight.data -= self.scaling * delta_w
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 使用示例：将 LoRA 注入一个简单的 MLP 中
+# ═══════════════════════════════════════════════════════════════════
+class SimpleMLP(nn.Module):
+    """被微调的目标模型（示意）"""
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(768, 1024)
+        self.fc2 = nn.Linear(1024, 512)
+        self.fc3 = nn.Linear(512, 10)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+
+
+def inject_lora_to_model(
+    model: nn.Module,
+    target_modules: set = {"fc1", "fc2"},  # 指定哪些层注入 LoRA
+    r: int = 8,
+    alpha: int = 16,
+) -> nn.Module:
+    """
+    将模型中指定的 nn.Linear 层替换为 LoRALinear。
+    面试技巧：能说出遍历 named_modules 并 isinstance 判断即可。
+    """
+    for name, module in model.named_modules():
+        # 仅处理指定名称的线性层
+        if name in target_modules and isinstance(module, nn.Linear):
+            # 获取父模块和当前模块在父模块中的属性名
+            parent_name = ".".join(name.split(".")[:-1]) or ""
+            leaf_name = name.split(".")[-1] if "." in name else name
+            if parent_name:
+                parent = model.get_submodule(parent_name)
+            else:
+                parent = model  # 顶层模块
+
+            # 创建 LoRA 包装层并替换
+            lora_layer = LoRALinear(module, r=r, alpha=alpha)
+            setattr(parent, leaf_name, lora_layer)
+    return model
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 测试代码：验证前向传播与梯度流
+# ═══════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    # 创建目标模型
+    model = SimpleMLP()
+    print("=== 注入前 ===")
+    for name, param in model.named_parameters():
+        print(f"  {name}: requires_grad={param.requires_grad}, shape={param.shape}")
+
+    # 注入 LoRA
+    model = inject_lora_to_model(model, target_modules={"fc1", "fc2"}, r=8, alpha=16)
+
+    print("\n=== 注入后 ===")
+    for name, param in model.named_parameters():
+        print(f"  {name}: requires_grad={param.requires_grad}, shape={param.shape}")
+
+    # 统计可训练参数
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print(f"\n可训练参数: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+
+    # 前向传播测试
+    x = torch.randn(2, 768)  # batch_size=2, hidden_dim=768
+    output = model(x)
+    print(f"前向输出 shape: {output.shape}")  # 期望: (2, 10)
+
+    # 梯度流测试
+    loss = output.sum()
+    loss.backward()
+
+    # 验证：lora_A 有梯度，original_linear.weight 无梯度
+    assert model.fc1.lora_A.grad is not None, "lora_A 应该有梯度！"
+    assert model.fc1.original_linear.weight.grad is None, "原始权重不应有梯度！"
+    print("\n梯度验证通过！")
+
+    # merge/unmerge 测试
+    model.fc1.merge_weights()
+    print(f"合并后 fc1 权重变化量: {(model.fc1.original_linear.weight[0, :5]).tolist()}")
+    model.fc1.unmerge_weights()
+    print("分离成功！")
+```
+
+**关键面试追问应对：**
+
+| 面试官可能问 | 你的回答要点 |
+|-|-|
+| 为什么 B 初始化为零？ | 确保 $\Delta W = 0$ 训练起始点，保护预训练知识不被随机噪声破坏 |
+| 为什么 A 用 Kaiming 初始化？ | 保证前向传播时 $A x$ 输出方差稳定，避免梯度消失/爆炸 |
+| $r$ 选多大合适？ | 简单任务 4-8，复杂任务 16-64，CV 任务通常偏大（32-128） |
+| merge 后还能继续训练吗？ | 需要先 unmerge，恢复原始 $W_0$ 和独立的 $A, B$ |
+| 为什么先算 $x A^\top$ 再算 $\cdot B^\top$？ | 先合成 $BA$ 再乘 $x$ 退化为 $O(dk)$ 计算；先 $Ax$ 复杂度是 $O(rk + rd)$ |
+| LoRA 旁路有 bias 吗？ | 标准实现没有；如果加，等价于在原始 bias 上叠加一个低秩学习项 |
+| 多卡训练 LoRA 要注意什么？ | DDP 时设 `find_unused_parameters=False`；某些层未参与训练时要排除 |
+| 训练后保存什么？ | 仅保存 LoRA 适配器（`adapter_model.safetensors` + `adapter_config.json`），通常 < 100MB |
+
+#### 2.2.1 实现层面的关键工程细节
+
+在面试或者实际开发中，下面这几个细节经常被忽略，但任何一个出错都会导致 LoRA 训练失败：
+
+**1. `requires_grad=False` 必须在所有参数上设置**
+
+仅设置 `weight.requires_grad=False` 而忘记 bias 是常见错误。Linear 层有 bias 时，bias 也会被 Adam 默认追踪。如果你忘了冻结 bias，"可训练参数量"打印出来会比预期多。
+
+**2. `original_linear` 必须保留为子模块**
+
+新人有时会想用 `self.weight = original_linear.weight` 直接拷引用，省掉一层包装。但这样会破坏 PyTorch 的 `named_parameters()` 遍历——优化器会找不到这个权重。**正确做法是把整个 `nn.Linear` 作为子模块持有**，让 PyTorch 自动追踪它。
+
+**3. `dropout` 的位置至关重要**
+
+LoRA 的 dropout 应该作用在 **A 矩阵的输入 x 上**（即 forward 的第一行 `self.dropout(x) @ self.lora_A.T`），而不是 A 输出或 B 输出。原因是：作用在 x 上等价于对原始输入做正则化，这与训练数据扩增同源；作用在中间表示上则会破坏 LoRA 旁路的低秩结构。
+
+**4. 推理时 `model.eval()` 不会自动禁用 LoRA**
+
+`eval()` 只会让 dropout / batchnorm 切到推理模式，**不会让 LoRA 旁路消失**。如果你想"对比基座模型和 LoRA 模型的输出差异"，必须主动调用 `with model.disable_adapter():` 或者 `unmerge_weights()`。
+
+#### 2.2.2 工业级 LoRA 实现的额外考虑
+
+上面这段代码是教学版，工业级实现还要处理以下问题：
+
+- **多适配器并存**：peft 库的 `LoraLayer` 内部用字典存储多组 $(A, B)$，按 adapter_name 切换。生产推理服务（如 Text Generation Inference, vLLM）都支持这种模式。
+- **量化基座兼容**：当基座是 4-bit 量化时，LoRA 旁路仍然是全精度，但要正确处理反量化 + LoRA 加法的精度流向。这需要继承 `bnb.nn.Linear4bit` 而非 `nn.Linear`。
+- **梯度累积友好性**：LoRA 与梯度累积兼容性好，因为冻结基座不参与梯度更新，累积过程只影响 $A, B$ 的梯度——这也是 LoRA 在小显存上做大 batch 的关键。
+- **混合精度训练**：LoRA 推荐用 BF16 而非 FP16，因为 BF16 的数值范围与 FP32 一致，避免 $BA$ 乘积下溢。FP16 容易在 $r$ 较大时出现数值不稳定。
+
+---
+
+### 2.3 peft 系统实操
+
+HuggingFace 的 `peft` 库是 LoRA 最常用的工程化实现。它把"配置 → 注入 → 训练 → 保存 → 加载"全流程封装成统一 API，同时还提供了 DoRA / rsLoRA / AdaLoRA 等变种的开关。下面这段示例代码是工业项目里最常见的"标准模板"，几乎所有微调脚本都从这里开始改。理解每个参数的含义比能写出代码更重要——下面我们用大段表格和文字逐个拆解。
+
+**文件路径：`/home/sunlupeng/my-projects/实习/微调/peft_lora_demo.py`**
+
+```Python
+"""
+使用 HuggingFace peft 库配置 LoRA 微调的标准实战代码
+工作空间: /home/sunlupeng/my-projects/实习/微调
+"""
+
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
+from peft import LoraConfig, get_peft_model, TaskType
+from datasets import Dataset
+import torch
+
+# ═══════════════════════════════════════════════════════════════════
+# Step 1: LoraConfig 核心参数配置
+# ═══════════════════════════════════════════════════════════════════
+lora_config = LoraConfig(
+    # ── 任务类型：CAUSAL_LM（因果语言模型）、SEQ_CLS（序列分类）等 ──
+    task_type=TaskType.CAUSAL_LM,
+
+    # ── 低秩分解秩 r ──
+    # r 越大，表达能力越强，但参数量线性增长
+    # 典型取值：4/8（轻量） / 16/32（标准） / 64（复杂任务）
+    r=16,
+
+    # ── 缩放因子 alpha ──
+    # 实际缩放系数 = alpha / r = 32 / 16 = 2.0
+    # 控制 LoRA 分支对输出的影响强度
+    lora_alpha=32,
+
+    # ── 目标模块（Target Modules）──
+    # 对于 LLaMA 架构，通常选择所有 attention 投影矩阵 + 部分 FFN
+    # q_proj, k_proj, v_proj, o_proj：Multi-Head Attention 的 Q/K/V/O 投影
+    # gate_proj, up_proj, down_proj：SwiGLU FFN 的门控/上投影/下投影
+    # 技巧：target_modules="all-linear" 可一键选中所有 nn.Linear
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+
+    # ── LoRA Dropout ──
+    # 在 A @ x 之后应用 dropout，防止 LoRA 分支过拟合
+    lora_dropout=0.05,
+
+    # ── 偏置项处理策略 ──
+    # "none"：所有 bias 冻结（默认，推荐）
+    # "all"：所有 bias 可训练（会略微增加参数量）
+    # "lora_only"：仅 LoRA 层的 bias 可训练
+    bias="none",
+
+    # ── 模块保存格式（新版本推荐）──
+    # True：使用更紧凑的保存格式
+    use_rslora=False,      # RS-LoRA：对 scaling 做 sqrt(r) 归一化（可忽略）
+    use_dora=False,        # DoRA：将 ΔW 做幅度-方向分解（实验性）
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# Step 2: 加载基础模型并注入 LoRA
+# ═══════════════════════════════════════════════════════════════════
+# 注意：实际使用时替换为真实模型路径
+model_name = "/home/sunlupeng/my-projects/实习/微调/models/base_model"  # 示意路径
+# model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)
+
+# 演示用：创建一个最小化模型结构示意
+print("LoRA 配置详情:")
+print(f"  r={lora_config.r}, alpha={lora_config.lora_alpha}")
+print(f"  scaling={lora_config.lora_alpha / lora_config.r}")
+print(f"  target_modules={lora_config.target_modules}")
+print(f"  lora_dropout={lora_config.lora_dropout}")
+print(f"  bias={lora_config.bias}")
+
+# model = get_peft_model(model, lora_config)
+# model.print_trainable_parameters()
+# 期望输出类似：trainable params: 8,388,608 || all params: 7,008,388,608 || trainable%: 0.12%
+
+# ═══════════════════════════════════════════════════════════════════
+# Step 3: 训练与保存
+# ═══════════════════════════════════════════════════════════════════
+save_path = "/home/sunlupeng/my-projects/实习/微调/output/lora_adapter"
+
+# training_args = TrainingArguments(
+#     output_dir="/home/sunlupeng/my-projects/实习/微调/output/logs",
+#     per_device_train_batch_size=4,
+#     gradient_accumulation_steps=4,
+#     learning_rate=2e-4,          # LoRA 推荐 lr: 1e-4 ~ 5e-4
+#     num_train_epochs=3,
+#     logging_steps=10,
+#     save_steps=500,
+#     fp16=True,
+#     save_strategy="steps",
+# )
+
+# trainer = Trainer(
+#     model=model,
+#     args=training_args,
+#     train_dataset=train_dataset,
+# )
+# trainer.train()
+
+# # ── 保存：仅保存 LoRA 适配器权重（几 MB），不保存完整模型 ──
+# model.save_pretrained(save_path)
+# tokenizer.save_pretrained(save_path)
+print(f"\nLoRA 适配器将保存到: {save_path}")
+```
+
+**核心参数速查表：**
+
+| 参数 | 作用 | 推荐值 | 面试考点 |
+|-|-|-|-|
+| `r` | 低秩分解维度 | 8/16/32 | 为什么这个范围？过小欠拟合，过大收益递减 |
+| `lora_alpha` | 缩放系数 | r 的 1-2 倍 | 与 r 的关系？实际 scaling = alpha/r |
+| `target_modules` | 注入层列表 | Q/K/V/O + FFN | 为什么选这些？Attention 投影是最关键的语义映射层 |
+| `lora_dropout` | 正则化 | 0.05-0.1 | 防止 LoRA 分支过拟合 |
+| `bias` | 偏置训练策略 | "none" | 默认冻结 bias 以减少参数量 |
+
+#### 2.3.1 peft 库的内部架构
+
+理解 `peft` 库的内部分层有助于排查训练中的奇怪问题。整个库分为三层：**配置层**（各种 `XxxConfig`）、**注入层**（`get_peft_model` 把 `LoraLayer` 替换原始 Linear）、**包装层**（`PeftModel` 提供统一的训练/推理接口）。当 `get_peft_model(model, lora_config)` 被调用时，peft 会做以下几件事：
+
+1. 遍历 `model.named_modules()`，找到所有匹配 `target_modules` 的 Linear / Conv1d 层
+2. 用 `LoraLayer`（继承自原 Linear）替换它们，新层内部维护一组 `lora_A` / `lora_B` 参数
+3. 把原始 Linear 的 weight / bias 设为 `requires_grad=False`
+4. 把整个模型用 `PeftModel` 包一层，覆写 `save_pretrained` / `from_pretrained` 等方法
+5. 自动统计可训练参数数量，供 `print_trainable_parameters()` 调用
+
+#### 2.3.2 常见 peft API 速查
+
+| API | 作用 | 典型调用场景 |
+|-|-|-|
+| `get_peft_model(base, config)` | 注入 LoRA 适配器 | 训练前 |
+| `model.print_trainable_parameters()` | 打印可训练参数占比 | 训练前 |
+| `model.save_pretrained(dir)` | 保存适配器（仅几 MB） | 训练后 |
+| `PeftModel.from_pretrained(base, dir)` | 加载适配器 | 推理前 |
+| `model.merge_and_unload()` | 合并并返回普通 transformers 模型 | 部署前 |
+| `model.merge_adapter()` / `unmerge_adapter()` | 临时合并/分离（保留 PEFT 包装） | 调试 |
+| `model.add_adapter(name, config)` | 注册新的适配器 | 多任务训练 |
+| `model.set_adapter(name)` | 切换当前激活的适配器 | 多任务推理 |
+| `model.disable_adapter()` | 临时禁用所有适配器（用纯基座） | 对比实验 |
+| `prepare_model_for_kbit_training(model)` | 为 QLoRA 准备模型 | 4-bit / 8-bit 量化前 |
+
+### 2.4 LoRA 的主流变种
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+LoRA 诞生后的几年内，社区涌现出大量变种，每个都针对 LoRA 的某个具体痛点。下面整理出最值得了解的六个变种——既是面试加分项，也对实际选型有帮助。
+
+#### 2.4.1 DoRA（Weight-Decomposed Low-Rank Adaptation, 2024）
+
+DoRA 把权重 $W$ 分解为**幅度（magnitude）**与**方向（direction）**两部分：
+
+$$W = m \cdot \frac{V}{\|V\|_c}$$
+
+其中 $m \in \mathbb{R}^{1 \times k}$ 是可学习的幅度标量（按列），$V/\|V\|_c$ 是方向矩阵，由 LoRA 风格的 $B A$ 学习。**核心改进**：把"方向"和"幅度"解耦后，LoRA 在低 rank 下也能逼近全量微调的效果。
+
+**适用场景**：当 LoRA r=8 已经不够、又不想加大 r（避免参数膨胀）时，开启 DoRA 通常能拿到 1-2 个百分点的提升。peft 库通过 `use_dora=True` 一键启用。
+
+#### 2.4.2 rsLoRA（Rank-Stabilized LoRA, 2023）
+
+rsLoRA 把缩放系数从 $\alpha/r$ 改为 $\alpha/\sqrt{r}$。**核心改进**：当 $r$ 很大（>128）时，原 $\alpha/r$ 会让 LoRA 旁路输出过小，导致训练几乎停滞。$\alpha/\sqrt{r}$ 让大 $r$ 下的训练保持稳定。
+
+**适用场景**：仅在 $r \geq 64$ 时考虑。对绝大多数业务任务（r=16）开不开 rsLoRA 都看不出差别。peft 库通过 `use_rslora=True` 启用。
+
+#### 2.4.3 LoRA+（2024）
+
+LoRA+ 让 $A$ 和 $B$ 使用**不同的学习率**：$\text{lr}_B = \lambda \cdot \text{lr}_A$，通常 $\lambda \in [8, 32]$。
+
+**为什么这么设计**：训练初期 $B=0$，$A$ 的梯度也几乎为零，整体训练慢。给 $B$ 一个更大的学习率，能让它快速从零脱离，反过来激活 $A$ 的梯度。
+
+**适用场景**：希望加快训练收敛速度时。论文报告在 GLUE 上能比标准 LoRA 快 2 倍收敛。
+
+#### 2.4.4 AdaLoRA（Adaptive LoRA, 2023）
+
+AdaLoRA 把 $\Delta W$ 用 **SVD-like 三矩阵分解**：$\Delta W = P \Lambda Q$，其中 $\Lambda$ 是对角的"奇异值"矩阵。训练过程中根据每个奇异值的重要性**动态裁剪**——重要的保留更多 $r$，不重要的逐步剪到 0。
+
+**核心改进**：不同层、不同投影矩阵需要的 $r$ 其实差异很大，AdaLoRA 自动学习这种分配。
+
+**适用场景**：当你不确定该给哪些层多少 $r$ 时，AdaLoRA 能自动找到最优分配。但代价是训练逻辑复杂，调参成本高。
+
+#### 2.4.5 LoftQ（LoRA-Fine-Tuning-Aware Quantization, 2024）
+
+LoftQ 专门解决 QLoRA 在低位数量化时的精度损失。它的核心思想：**LoRA 的初始** $A, B$ **不要随机/零初始化，而是用量化误差的低秩近似来初始化**。
+
+形式化：先把基座 $W$ 量化得到 $\tilde W$，定义量化误差 $E = W - \tilde W$，然后用 SVD 把 $E$ 近似为 $BA$，把这个 $BA$ 作为 LoRA 初值。
+
+**适用场景**：当 QLoRA 在你的任务上掉点严重时，LoftQ 能拿回 1-2 个百分点的精度。
+
+#### 2.4.6 PiSSA（Principal Singular Values and Singular Vectors Adaptation, 2024）
+
+PiSSA 与 LoftQ 思路类似，但更激进：**直接对预训练权重** $W$ **做 SVD，把 top-r 个奇异向量交给 LoRA 训练，剩余的奇异向量作为冻结基座**。
+
+形式化：$W = U \Sigma V^\top = (U_{:r} \Sigma_{:r}^{1/2})(\Sigma_{:r}^{1/2} V_{:r}^\top) + W_{\text{res}}$，前一项作为 LoRA 的 $BA$（带非零初始化），$W_{\text{res}}$ 作为冻结部分。
+
+**核心改进**：LoRA 训练的是"权重中最重要的低秩成分"，而不是从零学起。论文报告 PiSSA 在多个任务上比 LoRA 快 4-8 倍收敛。
+
+**对比小结**：
+
+| 变种 | 核心改进 | 启用方式 | 何时考虑 |
+|-|-|-|-|
+| DoRA | 幅度/方向分解 | `use_dora=True` | 低 r 下提精度 |
+| rsLoRA | $\alpha/\sqrt{r}$ 缩放 | `use_rslora=True` | 大 $r$ 训练 |
+| LoRA+ | A/B 异学习率 | 自定义优化器 | 加快收敛 |
+| AdaLoRA | 自适应 r 分配 | `AdaLoraConfig` | 不确定 r 分配 |
+| LoftQ | 量化误差初始化 | `LoftQConfig` | QLoRA 掉点严重 |
+| PiSSA | SVD 主成分初始化 | `init_lora_weights="pissa"` | 加速收敛 |
+
+---
+
+## 3. P-Tuning 微调技术（核心重点）
+
+### 3.1 架构改造原理
+
+P-Tuning 是另一条与 LoRA 完全独立的 PEFT 路线。如果说 LoRA 改的是"权重的旁路"，P-Tuning 改的就是"输入的前缀"——模型本体的一根毛都不动，只在输入端拼接一段可学习的连续向量，让这段向量在反向传播中被任务梯度自动塑形成"最优提示词"。这种"不动模型只改输入"的思路最早可追溯到 2020 年的 Prefix Tuning，2021 年清华大学的 GLM 团队进一步发展为 P-Tuning v1（用 Encoder 编码 prompt），2022 年又演化出 Deep Prompt 形式的 P-Tuning v2。本章我们逐节梳理这条演化路径。
+
+P-Tuning 的核心思想与 LoRA 完全不同：LoRA 在**权重空间**做低秩适配，而 P-Tuning 在**输入空间**插入可学习的连续提示向量（Continuous Prompt Embeddings）。
+
+#### 3.1.1 从离散 Prompt 到连续 Prompt
+
+传统 Prompt Engineering 使用**离散的、不可微的**自然语言 tokens：
+
+$$\text{Input} = [\text{"Classify the sentiment:"}, x_{\text{review}}]$$
+
+P-Tuning 将其替换为**连续的、可微的**嵌入向量：
+
+$$\text{Input} = [\mathbf{p}_0, \mathbf{p}_1, \ldots, \mathbf{p}_{m-1}, \text{Embed}(x)]$$
+
+其中 $\mathbf{p}_i \in \mathbb{R}^{d}$ 是第 $i$ 个可学习的 prompt token embedding，$m$ 是 prompt 长度，$d$ 是隐藏维度。这些向量不映射到任何真实词汇，仅作为优化变量存在于连续空间中。
+
+这种"软提示"的设计有三个深刻的优势。**第一，可微性**——离散 token 不能直接被梯度更新，每次都要靠人工试错；连续向量则可以直接用 SGD/Adam 优化，每一步都按 loss 梯度方向走。**第二，表达能力**——离散 prompt 受限于词表，只能在几万个 token 里挑组合；连续向量则在整个 $d$ 维欧氏空间里自由游走，理论表达能力远超离散方案。**第三，参数效率**——一组 20 个软提示 token 仅需 $20 \times d \approx 100\text{K}$ 参数，比 LoRA 的几百万参数还少 1-2 个数量级。
+
+但是软提示也带来一个明显的代价：**可解释性丧失**。你训练出来的 $\mathbf{p}_i$ 是一组数字，不对应任何真实词汇，无法被人类直接阅读或修改。这对调试和分享造成了一定不便——硬提示可以直接抄到别的项目里复用，软提示则必须连同基座模型一起分发，否则无法工作。
+
+#### 3.1.2 Prompt Encoder 的设计动机
+
+直接用随机初始化的嵌入向量训练存在两个问题：
+
+1. **优化不稳定**：连续空间的离散点之间缺乏语义约束，优化容易陷入局部最优。
+2. **相互依赖**：各 prompt token 独立更新，缺乏交互建模。
+
+P-Tuning 引入一个轻量的 **Prompt Encoder**（通常为 BiLSTM 或小型 MLP）将独立的 prompt embeddings 编码为上下文感知的表示：
+
+$$\tilde{\mathbf{p}}_{0:m-1} = \text{BiLSTM}(\mathbf{p}_{0:m-1})$$
+
+这样每个 $\tilde{\mathbf{p}}_i$ 融合了所有 prompt tokens 的上下文信息，使优化更稳定、收敛更快。
+
+Prompt Encoder 的设计反映了一个朴素但深刻的工程观察：**纯靠优化器去寻找"合适的 prompt 组合"非常困难，给优化器加一个轻量的"先验结构"能显著降低搜索难度**。BiLSTM 提供了"prompt token 之间是序列相关的"先验；MLP 提供了"prompt token 之间存在非线性组合"先验。两者都比"完全独立的 m 个向量"约束更强，更容易收敛。
+
+值得注意的是，P-Tuning v2 论文中作者发现：当模型规模足够大（>10B）时，Prompt Encoder 的作用反而被削弱——大模型自身的注意力机制就足够把"独立的 prompt token"组织起来。这就解释了为什么 Google 的 Prompt Tuning（专为 10B+ 模型设计）干脆把 Encoder 去掉了，直接学独立的 $\mathbf{p}_i$。
+
+#### 3.1.3 完整前向传播流程
+
+```Plaintext
+输入文本 "The movie was great"
+    │
+    ▼
+┌─────────────────────────────────────┐
+│  [p₀] [p₁] ... [pₘ₋₁]  ← 可学习   │  ← Prompt Embeddings
+│        │                            │
+│   Prompt Encoder (BiLSTM/MLP)       │  ← 轻量编码器
+│        │                            │
+│  [p̃₀] [p̃₁] ... [p̃ₘ₋₁]             │  ← 上下文感知 Prompt
+└─────────────────────────────────────┘
+    │
+    ▼
+[p̃₀, p̃₁, ..., p̃ₘ₋₁, Emb(The), Emb(movie), Emb(was), Emb(great)]
+    │
+    ▼
+  Frozen Transformer (主体参数冻结)
+    │
+    ▼
+  [h₀, h₁, ..., hₘ₋₁, h_text, ...]
+    │
+    ▼
+  下游任务 Head（分类/生成）
+```
+
+仔细看这张流程图能发现一个关键点：**Prompt Encoder 只在 forward 的最开始作用一次，得到的** $\tilde{\mathbf{p}}$ **直接拼接到真实文本 embedding 前面，之后整个 Transformer 把它们当作普通的输入序列处理**。换句话说，Transformer 内部并不"知道"前 m 个向量是 prompt——它们和真实文本 token 是平等的。这也意味着 prompt 会占用 cutoff_len 的预算：如果你的序列长度是 1024，prompt 长度 20，那实际能放真实文本的就是 1004 个 token。
+
+### 3.2 P-Tuning v1 vs v2
+
+| 维度 | P-Tuning v1 | P-Tuning v2 |
+|-|-|-|
+| **插入位置** | 仅 Embedding 层 | 每层都插入 Prompt |
+| **参数量** | 极少（\~0.01%） | 更多（\~0.1%-1%） |
+| **适用模型规模** | > 10B 效果才好 | 百 M \~ 数 B 均可 |
+| **核心改进** | — | Deep Prompt Tuning：多层联合优化 |
+| **本质** | 仅影响第一层输入 | 类似 Prefix-Tuning，影响每层注意力 |
+
+P-Tuning v2（也称 Deep Prompt Tuning）的核心改进在于：**不在仅在输入层插入 prompt，而是在 Transformer 的每一层都插入独立的可学习 key-value 前缀向量**。这使得 prompt 信号能够逐层作用于注意力计算，显著提升了中小规模模型上的效果。
+
+为什么 v1 在中小模型上效果差？回到 Transformer 的工作机制看：v1 的 prompt 只影响**第一层的输入**，之后每经过一层 Transformer，prompt 的信号都会被"稀释"——既要承载任务信息又要传递语义内容。在 30 层以上的深层网络中，prompt 信号往往在前 10 层就被注意力机制"消化"掉了，深层根本感知不到。**v2 的解决方案是在每一层都重新注入一次 prompt**，让信号始终保持新鲜。这个思路实际上与 Prefix Tuning 相同——v2 可以看作是简化版的 Prefix Tuning（去掉了重参数化 MLP）。
+
+v2 的另一个隐藏优势是**与生成任务的兼容性**。v1 的 prompt 只在输入层，对解码阶段（每一步预测下一个 token）的影响有限；v2 的 prompt 是每层 attention 的 K/V 前缀，无论解码到第几步，都能持续提供任务信号。这就是为什么 v2 在生成式任务（如对话、翻译）上比 v1 提升明显。
+
+面试时只需掌握 **"P-Tuning v1 仅在 Embedding 层插入连续 prompt；v2 在每层插入 deep prompt"** 即可。
+
+### 3.3 P-Tuning 工程实践经验
+
+#### 3.3.1 软提示长度 m 怎么选？
+
+经验值：
+
+| 任务类型 | 推荐 m |
+|-|-|
+| 文本分类（少样本） | 8-20 |
+| 文本分类（充足数据） | 20-50 |
+| 命名实体识别 / 关系抽取 | 20-50 |
+| 摘要生成 / 翻译 | 50-100 |
+| 对话生成 | 50-200 |
+
+m 太短表达能力不够；m 太长不仅占用序列长度预算，还容易过拟合。**实践建议是从 20 开始**，效果不够再翻倍尝试。
+
+#### 3.3.2 Prompt Encoder 的选择
+
+peft 库的 `PromptEncoderConfig` 支持两种 Encoder：
+
+- **MLP**（默认，推荐）：参数少（约 $2 \times \text{encoder\_hidden\_size} \times d$）、稳定、训练快
+- **LSTM**：参数多、需要序列展开、训练较慢，但在 m 较大（>50）时表达力更强
+
+如果你的 prompt 长度小于 30，直接用 MLP；超过 50 可以试 LSTM。但绝大多数业务场景 MLP 已经够用。
+
+#### 3.3.3 与 LoRA 的对比选型
+
+很多新人困惑"什么时候用 P-Tuning，什么时候用 LoRA"。下表给出工程经验：
+
+| 场景 | 推荐 |
+|-|-|
+| 大语言模型（>7B）的生成任务 | LoRA（强烈推荐） |
+| BERT 类编码器（&lt;1B）的分类任务 | P-Tuning v2 |
+| 极端低参数预算（< 10万参数） | P-Tuning v2 |
+| 多任务共享基座（每任务一个 prompt） | P-Tuning（适配器更轻） |
+| 推理时希望零延迟 | LoRA（可合并） |
+| 长文本任务（cutoff_len 紧张） | LoRA（不占用序列预算） |
+
+#### 3.3.4 常见踩坑
+
+- **忘记设置 `inputs_embeds` 接口**：P-Tuning 内部需要把 prompt 拼接到 embedding 层之后，所以必须用 `inputs_embeds` 而非 `input_ids` 作为前向输入。peft 库已经封装好，但手写时容易遗漏。
+- **attention_mask 没扩展**：拼接 prompt 后，前 m 个位置必须设为 1（可见），否则模型看不到 prompt。同样，peft 库会自动处理。
+- **保存适配器时漏存 Prompt Encoder**：v1 的 Encoder 参数也是可训练的，必须一起保存。`peft` 的 `save_pretrained` 默认会处理。
+
+---
+
+## 4. QLoRA 微调技术（核心重点）
+
+### 4.1 NF4 量化原理
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+QLoRA 由华盛顿大学的 Dettmers 等人在 2023 年提出，是 LoRA 的"显存极限版"。它的真正意义不是发明了一个新的微调方法，而是把"4-bit 量化"与"LoRA"无缝结合，证明了**在量化后的模型上做 LoRA 几乎不掉点**——这一发现让消费级显卡微调 33B、65B 模型成为可能，工业界的 GenAI 训练成本一夜之间降低一个数量级。
+
+QLoRA 是 LoRA 的内存优化版本，通过三项技术创新实现：**NF4 量化、双重量化（Double Quantization）、分页优化器（Paged Optimizers）**。它的核心价值是让 7B/13B 模型能在消费级 GPU（RTX 3090/4090 的 24GB）上完成微调。
+
+要理解 QLoRA，必须先理解量化（Quantization）的基础。量化在工程上有一条不言自明的核心原则：**用低位数存储 → 用高位数计算 → 用低位数存储**。这条原则的精髓在于"存储"和"计算"两个阶段使用不同精度。低位数存储节省的是显存（这是 GPU 上最稀缺的资源），高位数计算保留的是精度（保证梯度信号不丢失）。QLoRA 把这条原则推到了 4-bit 这个极限位置，并且通过"LoRA 旁路全精度"巧妙绕过了"低精度梯度难以稳定训练"这一传统量化的死结。
+
+#### 4.1.1 量化基础：从 FP32 到 INT4
+
+在深入 NF4 之前，先把"为什么需要量化"和"量化有几种基本类型"梳理清楚。常见的数值类型按位数排列：
+
+| 数据类型 | 位数 | 表示范围 | 7B 模型存储 |
+|-|-|-|-|
+| FP32 (单精度) | 32 | $\pm 3.4 \times 10^{38}$ | 28 GB |
+| FP16 (半精度) | 16 | $\pm 65{,}504$ | 14 GB |
+| BF16 (Brain Float) | 16 | 与 FP32 同范围、低精度 | 14 GB |
+| INT8 | 8 | -128 \~ 127 | 7 GB |
+| FP8 | 8 | 浮点 8-bit | 7 GB |
+| INT4 | 4 | -8 \~ 7（16 级） | 3.5 GB |
+| NF4 | 4 | 16 个非均匀级 | 3.5 GB |
+
+从 FP32 到 INT4 的存储压缩比是 8 倍——这是 QLoRA "免费午餐"的本质来源。但代价是数值精度的损失：INT4 只有 16 个级别，意味着任何浮点权重都要被映射到这 16 个值中的一个，量化误差天然存在。NF4 的核心贡献就是让这 16 个级别**尽可能精准地刻画预训练权重的实际分布**，从而把量化误差压到最低。
+
+线性对称量化（INT8 为例）的数学公式：
+
+$$q = \text{round}\left(\frac{w}{s}\right), \quad s = \frac{\max(|W|)}{127}$$
+
+反量化：$\hat{w} = q \cdot s$。这个公式的关键问题是它**假设权重均匀分布**——但预训练权重的实际分布是接近零均值正态分布的，均匀量化会浪费大量级别到"几乎没有值"的尾部区域。
+
+#### 4.1.2 为什么是 4-bit NormalFloat（NF4）？
+
+标准量化（如 FP16 → INT4 均匀量化）假设权重服从均匀分布，但预训练权重的实际分布近似**零均值的正态分布**：
+
+$$W \sim \mathcal{N}(0, \sigma^2)$$
+
+NF4 是**信息论最优**的正态分布量化格式。其设计思路：
+
+1. 将标准正态分布的 CDF（累积分布函数）的 $[0, 1]$ 区间等分为 $2^4 = 16$ 个概率质量相等的区间。
+2. 取每个区间的分位数值（quantile）作为该量化级别的代表值。
+3. 量化时将权重值映射到最近的分位数值。
+
+对于正态分布，接近 0 的值密度最高，因此 NF4 在零点附近分配了更密集的量化级别，在尾部则较稀疏。这比均匀量化在相同的 4-bit 位宽下保留了更多有效信息。
+
+具体来说，NF4 的 16 个量化级别归一化到 $[-1, 1]$ 区间后的实际数值是：
+
+```Plaintext
+-1.0000  -0.6962  -0.5251  -0.3949
+-0.2844  -0.1848  -0.0911   0.0000
+ 0.0796   0.1609   0.2461   0.3379
+ 0.4407   0.5626   0.7228   1.0000
+```
+
+仔细观察这些数值，可以发现：
+
+- **0 附近的密度最高**：从 0 到 ±0.2 之间分布着 5 个级别（约 1/3）
+- **两端的密度最低**：从 ±0.7 到 ±1.0 只有 3 个级别（约 1/5）
+- **整体非对称性极小**：正负级别几乎对称分布，符合零均值高斯的假设
+
+这种"中间密、两头稀"的设计完美匹配了预训练权重的实际分布形态。**信息论意义**：对于服从正态分布的随机变量，NF4 是 4-bit 范围内的最优编码——在熵编码意义下，按分位数划分的编码能最大化每一 bit 携带的信息量。这就是 QLoRA 论文敢声称"NF4 用 4-bit 达到了与 16-bit 几乎相同的下游任务效果"的理论依据。
+
+#### 4.1.3 分块量化与绝对值最大值缩放
+
+实际实现中，QLoRA 对权重矩阵按块（block-wise）进行量化——将矩阵分为大小为 64-256 的连续块，每块独立计算缩放因子：
+
+$$\text{quant}(w) = \text{round}\left(\frac{w}{\text{absmax}(\text{block})} \cdot (2^{b-1} - 1)\right)$$
+
+其中 $\text{absmax}$ 是该块的绝对最大值，$b=4$ 是位宽。分块量化的好处是避免单个离群值（outlier）主导整个矩阵的量化精度。
+
+反量化时：
+
+$$w_{\text{dequant}} = \text{quant}(w) \cdot \frac{\text{absmax}(\text{block})}{2^{b-1} - 1}$$
+
+为什么需要分块？这与神经网络权重的统计特性有关。**预训练权重虽然整体接近正态分布，但局部存在显著的离群值（outliers）**——某些通道的权重可能比其他通道大 1-2 个数量级。如果对整个矩阵用一个全局 absmax 缩放，所有"普通权重"都会被压缩到极小的数值区间，量化误差被离群值放大。分块量化把矩阵切成小片段，每片独立计算 absmax，**离群值只影响所在的 64 个权重，不会污染整个矩阵**。
+
+块大小的选择是个工程权衡：块越小（如 32），精度越高但元数据开销越大；块越大（如 256），元数据省但抗离群值能力弱。QLoRA 默认选 64 是经过大量实验验证的"甜点"。
+
+#### 4.1.4 量化误差的统计分析
+
+NF4 在 LLaMA-7B 上的实测量化误差有多大？论文给出了详细的数字：相比 FP16 基线，NF4 量化引入的权重误差均方根（RMSE）约为 $4 \times 10^{-3}$，下游任务（MMLU、HellaSwag 等）的精度损失约为 0.5-1.5 个百分点。这个损失对绝大多数业务场景是完全可以接受的——你用 1.5 个百分点的精度换来了 4 倍的显存节省，**这种性价比在工程界几乎找不到对手**。
+
+### 4.2 双重量化与分页优化器
+
+#### 4.2.1 双重量化（Double Quantization）
+
+分块量化引入了额外的存储开销——每个块的缩放因子（absmax）。对于 64 个元素的块，这些缩放因子占额外 $1/64 \approx 1.56\%$ 的存储。双重量化对**缩放因子本身**再进行一次 8-bit 量化，将这部分开销进一步压缩到约 0.127%。
+
+总内存（7B 模型，FP16 → NF4 + 双重量化）：
+
+- 原始 FP16：$7\text{B} \times 2\text{ bytes} = 14\text{ GB}$
+- NF4（分块量化）：$7\text{B} \times 0.5\text{ bytes} + 1.56\% \approx 3.5\text{ GB} + 0.22\text{ GB} \approx 3.72\text{ GB}$
+- NF4 + 双重量化：$\approx 3.53\text{ GB}$
+
+工程上这种"递归压缩元数据"的思路非常优雅——你压缩了主体数据，主体数据变小后元数据的相对开销显得突出，于是再压缩一次元数据。理论上还可以做三重、四重量化，但收益递减得太快，QLoRA 论文中止在二重就足够了。**这种以小博小的优化，是 QLoRA 能在 24GB 显卡上跑通 33B 模型的关键工程细节之一**。
+
+更精确地算一笔账：以 7B 模型为例，分块量化引入了约 7B/64 = 1.1 亿个 FP32 absmax，占 440 MB；双重量化把这部分 absmax 再用 8-bit 量化（每 256 个共享一个 FP32 总 absmax），降到约 110 MB——**省下 330 MB，相对总显存 4 GB 来说节省约 8%**。这个节省看似不大，但叠加到 33B、70B 模型上就是 GB 级别的实质性收益。
+
+#### 4.2.2 分页优化器（Paged Optimizers）
+
+借鉴操作系统内存管理中的分页机制：当 GPU 显存不足时，将优化器状态的某些"页"自动卸载到 CPU RAM，需要时再换入。这避免了显存 OOM，使 33B 模型的 QLoRA 微调也能在 24GB 显卡上完成。
+
+分页优化器的工作机制类似于操作系统的虚拟内存（virtual memory）。在常规训练中，所有优化器状态（Adam 的 m, v）必须常驻 GPU 显存，否则会触发 OOM。但实际上，每个参数的优化器状态在反向传播完成后才被访问，并且访问时间高度局部化（一个 step 内连续访问，跨 step 间隔很久）。**分页优化器利用这种时间局部性，把暂时不用的状态换到 CPU RAM，需要时再换回 GPU**。
+
+实践中，`paged_adamw_8bit` 比 `adamw_torch` 慢约 5%-15%，但能让 33B 甚至 70B 模型在单卡上微调。这是一笔非常划算的"速度换显存"。启用方式很简单：
+
+```Python
+TrainingArguments(optim="paged_adamw_8bit")
+```
+
+注意分页优化器要求 CPU 内存足够大——把 33B 模型的 Adam 状态卸到 CPU 需要约 100GB 内存。如果你的服务器内存不够，分页操作会触发 swap 到硬盘，性能会断崖式下跌。
+
+### 4.3 QLoRA + LoRA 联合机制
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+QLoRA 的微调范式是：
+
+```Plaintext
+冻结的 NF4 量化基础模型 (4-bit 存储)
+     │
+     ├── 前向传播时反量化为 BF16/FP16 计算
+     │
+     └── 仅在反量化后的 FP16 权重上附加 LoRA 分支 (FP16 计算精度)
+```
+
+关键点：
+
+1. **存储精度与计算精度分离**：权重以 4-bit NF4 格式存储（省显存），前向传播时临时反量化为 FP16/BF16 参与计算（保精度）。
+2. **LoRA 分支保持全精度**：$A$ 和 $B$ 矩阵始终以 FP16/BF16 存储和更新，梯度计算不涉及量化误差。
+3. **仅计算时反量化，不修改存储中的量化权重**：反向传播时梯度流经 LoRA 分支和反量化后的激活值，但量化权重本身保持冻结。
+
+```Python
+# QLoRA 配置示例（基于 bitsandbytes + peft）
+from transformers import BitsAndBytesConfig
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,                      # 启用 4-bit 加载
+    bnb_4bit_quant_type="nf4",              # 量化类型：NF4
+    bnb_4bit_compute_dtype=torch.bfloat16,  # 计算精度：BF16
+    bnb_4bit_use_double_quant=True,         # 启用双重量化
+)
+
+# model = AutoModelForCausalLM.from_pretrained(
+#     "/home/sunlupeng/my-projects/实习/微调/models/base_model",
+#     quantization_config=bnb_config,
+#     device_map="auto",
+# )
+
+# LoraConfig 与标准 LoRA 完全一致
+# lora_config = LoraConfig(r=16, lora_alpha=32, ...)
+# model = get_peft_model(model, lora_config)
+```
+
+**面试记忆口诀**：存储用 4-bit（省显存），计算用 16-bit（保精度），LoRA 分支全精度（不量化），梯度只流向 LoRA（冻结量化权重）。
+
+#### 4.3.1 前向传播的精度流向
+
+让我们把 QLoRA 的前向传播分解成具体的精度变化序列，看清"4-bit 存储 / 16-bit 计算"是如何具体实现的：
+
+```Plaintext
+Step 1: 基座权重 W_q (NF4, 4-bit) 加载到 GPU 显存
+Step 2: 前向开始，遇到一个线性层
+Step 3: bitsandbytes 把 W_q 临时反量化为 W_dq (BF16, 16-bit)
+Step 4: 计算 h_base = W_dq @ x  (BF16 精度)
+Step 5: 释放 W_dq（不存回去），保留 W_q (NF4)
+Step 6: 计算 LoRA 旁路 h_lora = (α/r) · B @ A @ x  (BF16 精度)
+Step 7: h = h_base + h_lora，输出到下一层
+```
+
+注意 Step 5 的"释放 W_dq"——这是 QLoRA 与传统 INT8 量化的关键差异。传统方式会把反量化结果缓存起来供反向传播用，而 QLoRA 直接丢弃，**反向传播时再次按需反量化**。这种"用计算换显存"的策略让基座权重始终保持 4-bit 存储，永远不会因为反量化而占用 16-bit 显存。
+
+#### 4.3.2 反向传播的梯度流向
+
+反向传播比前向稍复杂——梯度必须流经"反量化的基座 + LoRA 旁路"两条路径：
+
+```Plaintext
+Step 1: 上游传来 ∂L/∂h
+Step 2: 计算 LoRA 旁路的梯度
+  ∂L/∂B = (α/r) · ∂L/∂h · (Ax)^T
+  ∂L/∂A = (α/r) · B^T · ∂L/∂h · x^T
+Step 3: 计算 x 的梯度（继续向上游传播）
+  ∂L/∂x = W_dq^T · ∂L/∂h + (α/r) · A^T · B^T · ∂L/∂h
+Step 4: W_dq 在 Step 3 计算完后被丢弃，不更新
+Step 5: 优化器只更新 A, B（用 paged_adamw_8bit）
+```
+
+关键观察：**量化基座 W_q 不参与任何梯度计算**——它只是一个"只读的查找表"，提供反量化后的值给前向使用。梯度只在 LoRA 分支 $(A, B)$ 上流动。这就是为什么 QLoRA 训练时显存占用和普通 LoRA 几乎相同——量化基座不需要梯度、不需要优化器状态。
+
+#### 4.3.3 `prepare_model_for_kbit_training` 在做什么？
+
+这个函数是 QLoRA 训练的"必备开关"，缺了它训练会发散（loss 变 NaN）。它内部做了四件事：
+
+1. **把 LayerNorm 强制转回 FP32**：4-bit 量化对 LayerNorm 的数值稳定性影响很大，归一化操作必须用全精度计算
+2. **把 lm_head 转回 FP32**：输出层的 softmax 数值极敏感，量化会导致概率分布塌缩
+3. **启用 gradient_checkpointing**：以计算换显存，关键路径以外的中间激活不保存
+4. **给 embedding 层加梯度钩子**：让 LoRA 旁路的梯度能正常反传到输入侧
+
+新人在 QLoRA 上踩的坑里，至少有一半都来自漏调这个函数。如果你看到训练 loss 在前几步就跳到 NaN，几乎可以闭着眼断言这就是原因。
+
+### 4.4 QLoRA 与其他量化方法的对比
+
+QLoRA 不是唯一的量化方案。在生产环境中，你可能还会遇到 GPTQ、AWQ、SmoothQuant 等。下表帮你快速区分：
+
+| 方案 | 训练时使用 | 推理时使用 | 量化粒度 | 典型精度损失 |
+|-|-|-|-|-|
+| **QLoRA (bnb)** |  | ️ 慢 | 块级（64 元素） | 0.5-1.5% |
+| **GPTQ** |  |  | 层级 | 0.5-1% |
+| **AWQ** |  |  | 通道级 | 0.3-0.8% |
+| **SmoothQuant** |  |  | 激活值平滑 | < 1% |
+
+**核心区别**：QLoRA 是为**训练**设计的（用 bitsandbytes 在前向中动态反量化），GPTQ/AWQ 是为**推理**设计的（用专门的低位数 kernel 直接在 4-bit 上做矩阵乘）。GPTQ/AWQ 推理速度比 QLoRA 快 2-3 倍，但不能用于训练。
+
+**实际工业链路**：训练时用 QLoRA，训练完合并 LoRA 适配器、导出全精度模型，再用 GPTQ 或 AWQ 转成 4-bit 推理。这条路径兼顾了训练显存与推理性能。
+
+### 4.5 QLoRA 工程经验
+
+#### 4.5.1 何时选 QLoRA 而非普通 LoRA？
+
+- **显存不够**：模型 + LoRA + Adam 状态超出显卡容量时
+- **想跑更大模型**：用 24GB 显卡跑 13B / 33B
+- **多任务并行**：同一张卡上同时训练多个适配器
+- **快速迭代**：QLoRA 训练显存小，可以加大 batch、加快迭代
+
+#### 4.5.2 何时不选 QLoRA？
+
+- **精度极端敏感**：科研基准任务，要求与全量微调误差 < 0.5%
+- **训练速度优先**：QLoRA 比 LoRA 慢约 30%（因为前向反量化开销）
+- **基座模型小（< 1B）**：原本显存就够，量化收益小
+
+#### 4.5.3 QLoRA 训练经验小结
+
+| 配置项 | 推荐值 |
+|-|-|
+| 量化类型 | `nf4`（不要选 `fp4`） |
+| 计算精度 | `bfloat16`（不要选 `float16`） |
+| 双重量化 | `True`（几乎无损） |
+| 优化器 | `paged_adamw_8bit` |
+| `prepare_model_for_kbit_training` | **必调** |
+| Gradient Checkpointing | 强烈推荐开启 |
+| 学习率 | 2e-4 起步，与普通 LoRA 相同 |
+
+---
+
+## 5. IA3 微调技术（了解即可）
+
+### 5.1 激活值缩放原理
+
+IA3（Infused Adapter by Inhibiting and Amplifying Inner Activations）由 Liu 等人在 2022 年提出，是目前 PEFT 方法谱系中"参数效率最高"的方案——每个 Transformer 层只引入三个可学习的向量，总参数量比 LoRA 还少一个数量级。它的设计哲学非常极简：与其学一个矩阵，不如学一个向量；与其改变线性变换，不如直接缩放激活值。这种极简风格让 IA3 在某些场景（多任务并存、参数预算极紧）下显得很有优势，但表达能力的限制也让它在复杂任务上不敌 LoRA。
+
+IA3（Infused Adapter by Inhibiting and Amplifying Inner Activations）是目前**参数效率最高**的 PEFT 方法之一，仅通过三个可学习的缩放向量来适配模型：
+
+$$l_k \in \mathbb{R}^{d_k}, \quad l_v \in \mathbb{R}^{d_v}, \quad l_{ff} \in \mathbb{R}^{d_{ff}}$$
+
+对应作用于：
+
+- **Key 投影**：$\tilde{K} = l_k \odot (W_K x)$ —— 缩放注意力 Key 矩阵
+- **Value 投影**：$\tilde{V} = l_v \odot (W_V x)$ —— 缩放注意力 Value 矩阵
+- **FFN 中间激活**：$\tilde{h}_{ff} = l_{ff} \odot (W_{ff} x)$ —— 缩放前馈网络中间激活
+
+核心公式（以 Key 为例）：
+
+$$h = W_{Q} x \cdot (l_k \odot W_{K} x)^\top$$
+
+其中 $\odot$ 表示逐元素乘法（Hadamard product）。
+
+理解 IA3 的关键是搞清楚"为什么作用在 K/V 和 FFN 中间激活上"。从注意力机制看，$Q \cdot K^\top$ 决定"看哪里"，$V$ 决定"取什么内容"——缩放 K 等于"调整 token 之间的注意力关系"，缩放 V 等于"调整每个位置贡献的内容强度"。这两个操作覆盖了注意力机制的核心功能。FFN 中间激活的缩放则相当于"对前馈网络的每个隐藏神经元做软门控"，能调节非线性变换的强度。这三个缩放向量加起来覆盖了 Transformer 中所有"关键的非线性放大点"。
+
+### 5.2 数学推导与参数量
+
+参数量对比：
+
+- LoRA（r=8 作用于 Q+V）：每个注意力层 $8 \times (d_{model} + d_{model}) = 16 d_{model}$ 个参数
+- IA3：每个注意力层 $d_k + d_v + d_{ff} \approx 3 d_{model}$ 个参数
+- IA3 参数量约为 LoRA 的 $3 d_{model} / 16 d_{model} \approx 18.75\%$
+
+以 Qwen2-7B 为例（$d_{kv}=512, d_{ff}=18944$，32 层）：
+
+- IA3 参数量：每层 $512 + 512 + 18944 \approx 20$K，32 层共 **0.64M**
+- LoRA r=16 参数量：约 **48M**
+- **IA3 是 LoRA 的 1/75**
+
+这个数字看似惊人，但要记住：参数量少不一定意味着效果好。**IA3 的表达能力受限于"逐元素缩放"这一限制**——它只能放大或抑制现有的激活通道，无法在任何意义上"创造新的特征组合"。而 LoRA 的 $BA$ 矩阵能在低维空间里学到全新的线性变换，表达能力本质上更强。
+
+### 5.3 初始化与训练动力学
+
+IA3 的初始化非常优雅：**所有缩放向量初始化为全 1**。这保证了 $l \odot x = 1 \cdot x = x$，训练起始时模型行为完全等同于预训练模型——这与 LoRA 的"$B=0$ 起步"是同一思想的另一种实现。
+
+训练时梯度公式（以 $l_k$ 为例）：
+
+$$\frac{\partial \mathcal{L}}{\partial l_k} = \frac{\partial \mathcal{L}}{\partial \tilde K} \odot (W_K x)$$
+
+注意这里没有"梯度被零截断"的问题——因为 $l_k$ 初始化为 1（非零），$\partial \mathcal{L}/\partial l_k$ 从第一步就有非零信号。这也是 IA3 收敛特别快的原因之一：**没有 LoRA 那种"A 的梯度被 B=0 截断"的级联启动期**。
+
+### 5.4 何时选 IA3？
+
+**优先选 IA3 的场景**：
+
+- 任务极简单（情感二分类、命名实体识别这种"打标签"型任务）
+- 参数预算极紧张（< 1M）
+- 多任务并存：要在同一基座上挂几十、上百个任务适配器
+- 需要快速收敛：IA3 训练 1 个 epoch 通常就够
+
+**不要选 IA3 的场景**：
+
+- 生成式任务（对话、翻译、摘要）
+- 复杂推理任务（数学、代码、多步推理）
+- 多模态任务（视觉理解、图文对齐）
+
+### 5.5 与 LoRA 的横向对比
+
+| 维度 | LoRA | IA3 |
+|-|-|-|
+| 改造方式 | 权重旁路（$BA$） | 激活值缩放（$l \odot$） |
+| 参数量级 | 0.1%-1% | 0.01% |
+| 表达能力 | 强（低秩线性变换） | 弱（仅缩放） |
+| 训练速度 | 标准 | 略快 |
+| 收敛速度 | 中等（B=0 起步） | 快（l=1 起步） |
+| 适合任务 | 通用 | 简单分类、风格调整 |
+| 推理时合并 | 可（加法） | 可（融入 W） |
+| 工业普及度 | 极高 | 低 |
+
+**IA3 的不足**：由于参数极少且无低秩结构约束，对复杂任务或小模型的适配能力不如 LoRA。面试时只需回答 **"IA3 通过学习逐元素的激活缩放向量** $l_k, l_v, l_{ff}$ **来适配模型，参数效率最高但表达能力有限"** 即可。
+
+### 5.6 peft 库中的 IA3 实战
+
+```Python
+from peft import IA3Config, get_peft_model, TaskType
+
+ia3_config = IA3Config(
+    task_type=TaskType.CAUSAL_LM,
+    target_modules=["k_proj", "v_proj", "down_proj"],
+    feedforward_modules=["down_proj"],   # 标记哪些属于 FFN
+    init_ia3_weights=True,                # 初始化为全 1
+)
+model = get_peft_model(model, ia3_config)
+model.print_trainable_parameters()
+```
+
+注意 `target_modules` 与 `feedforward_modules` 的区别：前者指定要在哪些层注入 IA3，后者标记其中哪些是 FFN 层（IA3 论文中 FFN 的缩放位置略有不同，是在 FFN 中间激活上而非输出上）。配置错了不会报错，但效果会差。
+
+---
+
+## 6. LLaMA-Factory 系统实操
+
+### 6.1 系统核心优势
+
+如果说 peft 库是"把每种 PEFT 方法封装成统一 API"的工具层，那么 LLaMA-Factory 就是更上一层的"工程系统层"——它把数据预处理、模型加载、量化、PEFT 注入、训练循环、checkpoint 管理、评估、导出全部整合成 YAML 配置 + CLI 命令的工作流。一句话总结：**peft 是给算法工程师用的库，LLaMA-Factory 是给产品/数据工程师用的系统**。学会 LLaMA-Factory，你可以把"从一份 JSON 数据到一个可部署的微调模型"的端到端时间压缩到 30 分钟以内。
+
+LLaMA-Factory 是目前社区最活跃的开源大模型微调系统之一，其核心优势包括：
+
+| 优势维度 | 具体描述 |
+|-|-|
+| **多模型支持** | LLaMA / Mistral / Qwen / ChatGLM / DeepSeek 等 100+ 模型 |
+| **多方法集成** | Full / LoRA / QLoRA / DoRA / GaLore / APOLLO 等，一个参数切换 |
+| **数据流标准化** | 统一的数据集注册→预处理→模板化→训练流水线 |
+| **Web UI 交互** | 浏览器内完成数据集上传、参数配置、训练监控 |
+| **量化推理导出** | 训练后可导出 GGUF (llama.cpp) 或 GPTQ 格式 |
+| **显存高度优化** | Flash Attention-2 + 4-bit QLoRA + Gradient Checkpointing |
+
+#### 6.1.1 LLaMA-Factory 的系统架构
+
+LLaMA-Factory 内部分为五大模块，每个模块解决一类问题：
+
+```Plaintext
+┌────────────────────────────────────────────────────────────┐
+│  ① 数据层 (src/llamafactory/data/)                          │
+│     - 数据集加载（Alpaca / ShareGPT / OpenAI / 自定义）      │
+│     - 对话模板渲染（qwen / llama3 / chatglm3 / mistral）    │
+│     - Tokenizer 预处理与缓存                                │
+├────────────────────────────────────────────────────────────┤
+│  ② 模型层 (src/llamafactory/model/)                         │
+│     - 自动识别模型架构                                       │
+│     - 量化加载（4-bit / 8-bit）                              │
+│     - Flash Attention-2 / SDPA 切换                          │
+├────────────────────────────────────────────────────────────┤
+│  ③ 微调层 (src/llamafactory/train/)                          │
+│     - SFT / DPO / PPO / KTO / ORPO 多阶段                   │
+│     - LoRA / Full / Freeze 多方法                            │
+│     - Unsloth / GaLore / APOLLO 加速器集成                  │
+├────────────────────────────────────────────────────────────┤
+│  ④ 评估层 (src/llamafactory/eval/)                           │
+│     - 内置 MMLU / CMMLU / CEVAL / BBH 等基准                │
+│     - 自定义指标接入                                         │
+├────────────────────────────────────────────────────────────┤
+│  ⑤ 导出层 (src/llamafactory/export/)                         │
+│     - 合并 LoRA + 量化导出 (GGUF / GPTQ / AWQ)               │
+│     - HuggingFace 格式标准化                                 │
+└────────────────────────────────────────────────────────────┘
+```
+
+理解这个分层，你就能解释为什么 YAML 里既有 `dataset` 又有 `template`（前者属于数据层、后者属于对话模板渲染），既有 `stage` 又有 `finetuning_type`（前者属于训练阶段、后者属于具体方法）。
+
+#### 6.1.2 LLaMA-Factory vs 自己写 peft 脚本
+
+很多新人会问：既然 peft 已经够用了，为什么还要学 LLaMA-Factory？三个层面回答：
+
+**第一，节省时间**。自己写 peft 脚本需要处理数据加载、tokenize、对话模板、训练循环、评估、导出，每一步都有可能踩坑。LLaMA-Factory 把这些封装成 50 行 YAML，几分钟就能跑通。
+
+**第二，统一接口**。在团队协作中，每个人写一个 peft 脚本，数据格式各不相同，复现别人的实验非常痛苦。LLaMA-Factory 强制统一了数据格式、配置格式、保存格式，团队复现成本大大降低。
+
+**第三，跟上前沿**。LLaMA-Factory 维护者会快速集成最新的 PEFT 方法和加速技巧（如 Unsloth、APOLLO 等）。你只需要改一个开关就能用上最新技术，而自己手写 peft 脚本则要从零集成。
+
+### 6.2 完整微调任务实战
+
+> **任务场景**：欺诈文本分类 —— 训练模型识别电商评论中的虚假/欺诈内容  
+> **基座模型**：Qwen2-7B-Instruct  
+> **工作空间**：`/home/sunlupeng/my-projects/实习/微调/LLaMA-Factory`
+
+下面我们用一个真实任务把整个 LLaMA-Factory 流水线跑通。这个任务的特点是：数据规模适中（百到千级别）、标签明确（二分类）、有业务价值（电商场景常见），非常适合作为简历项目使用。
+
+#### 6.2.1 环境准备与系统安装
+
+LLaMA-Factory 是一个 GitHub 上的开源仓库，安装方式是源码安装（`pip install -e`），不要从 pypi 装老版本。整个安装过程在干净的 Linux 环境上约需 10-30 分钟（主要时间花在 flash-attn 编译）。如果你的 CUDA 环境与官方推荐版本不匹配，flash-attn 可能编译失败——这时可以先跳过 flash-attn，训练时改用 SDPA 后端，影响速度但不影响功能。
+
+```Bash
+# ═══════════════════════════════════════════════════════════════
+# 工作空间：严格在指定目录下操作
+# ═══════════════════════════════════════════════════════════════
+cd /home/sunlupeng/my-projects/实习/微调
+
+# 克隆 LLaMA-Factory 系统
+git clone https://github.com/hiyouga/LLaMA-Factory.git
+cd LLaMA-Factory
+
+# 安装依赖（推荐使用虚拟环境）
+python -m venv venv
+source venv/bin/activate
+pip install -e ".[torch,metrics]"
+pip install flash-attn --no-build-isolation  # 可选，加速训练
+```
+
+#### 6.2.2 数据构建（关键步骤）
+
+数据是微调成败的关键因素，没有之一。模型架构、训练方法、超参数都可以事后调整，但数据质量决定了模型的天花板。LLaMA-Factory 的数据集系统设计得非常严谨——所有数据必须先在 `dataset_info.json` 中注册，告诉系统"这份数据用什么格式、各字段如何映射"，然后才能在 YAML 里通过名字引用。这种"先注册、再引用"的设计避免了散落各处的数据路径，便于团队协作。
+
+LLaMA-Factory 使用 JSON 格式的数据集注册系统。在 `data/dataset_info.json` 中注册自定义数据集，数据文件放在 `data/` 目录下。
+
+**文件路径：`/home/sunlupeng/my-projects/实习/微调/LLaMA-Factory/data/fraud_detection.json`**
+
+```JSON
+[
+  {
+    "instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。",
+    "input": "这个产品真的是太好用了！用了三天皮肤就白了很多，强烈推荐！！五星好评！！！",
+    "output": "虚假"
+  },
+  {
+    "instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。",
+    "input": "物流有点慢，包装有轻微破损，但产品质量还可以，给个中评吧。",
+    "output": "真实"
+  },
+  {
+    "instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。",
+    "input": "绝对的神器！！！姐妹们冲就完事了！！！不买后悔一辈子！！！",
+    "output": "虚假"
+  }
+  // ... 实际数据集建议至少 500-1000 条标注样本
+]
+```
+
+在 `data/dataset_info.json` 末尾追加注册信息：
+
+```JSON
+{
+  "fraud_detection": {
+    "file_name": "fraud_detection.json",
+    "columns": {
+      "prompt": "instruction",
+      "query": "input",
+      "response": "output"
+    }
+  }
+}
+```
+
+**数据构建注意事项：**
+
+- **指令格式一致性**：所有样本使用统一的 instruction 前缀，确保模型理解任务边界。
+- **标签平衡**：正负样本比例尽量接近 1:1，避免类别不平衡导致模型偏向多数类。
+- **数据清洗**：去除特殊字符、统一标点、截断过长文本（超过模型 max_length 的样本做截断或丢弃）。
+- **质量优先于数量**：LLaMA-Factory 官方实验表明，高质量 1K 样本效果优于低质量 10K 样本。
+
+工业经验补充：数据质量的提升往往比模型/超参数调优更有效。社区里有一个广为流传的实验对照：**同一个 7B 基座，分别用 50K 条"普通爬虫"数据和 1K 条"人工精修"数据微调，后者的下游评估分数高出 4-7 个百分点**。原因不难理解——大模型本身已经在海量数据上预训练过，下游微调的边际收益主要来自"格式对齐"和"任务对齐"，而不是"知识灌输"。1K 条高质量样本足以完成对齐，多出来的低质量样本反而会引入噪声。
+
+#### 6.2.3 模型调优配置
+
+YAML 配置是 LLaMA-Factory 的核心入口。一个完整的 YAML 文件大约 30-50 行，覆盖了从模型路径到训练超参的所有设置。下面这份示例针对欺诈检测任务做了 QLoRA 优化（4-bit 量化 + LoRA + paged 优化器），可以在 24GB 显卡上跑 7B 模型。
+
+**文件路径：`/home/sunlupeng/my-projects/实习/微调/LLaMA-Factory/examples/train_lora/qwen2_lora_fraud.yaml`**
+
+```YAML
+### ═══════════════════════════════════════════════════════════
+### LLaMA-Factory QLoRA 微调配置文件
+### 任务：欺诈文本分类
+### ═══════════════════════════════════════════════════════════
+
+### 模型配置
+model_name_or_path: /home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct
+
+### 微调方法选择
+stage: sft                           # 监督微调阶段
+finetuning_type: lora                # 微调方法：lora / full / freeze
+
+### LoRA 超参数
+lora_rank: 16                        # 低秩分解秩 r
+lora_alpha: 32                       # 缩放因子
+lora_target: all                     # 目标模块：all = 所有 linear 层
+lora_dropout: 0.05                   # Dropout 正则化
+
+### QLoRA 量化配置
+quantization_method: bitsandbytes    # 量化后端：bitsandbytes
+quantization_bit: 4                  # 4-bit 量化
+double_quantization: true            # 启用双重量化
+quantization_type: nf4               # NF4 量化类型
+
+### 数据集配置
+dataset: fraud_detection             # 在 dataset_info.json 中注册的数据集名
+template: qwen                        # 对话模板格式
+cutoff_len: 1024                      # 最大序列长度
+overwrite_cache: true                 # 重新预处理缓存
+preprocessing_num_workers: 8          # 数据预处理并行数
+
+### 训练超参数
+output_dir: /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_qwen
+do_train: true
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 8        # 等效 batch_size = 4 × 8 = 32
+learning_rate: 2.0e-4                # LoRA 推荐 lr 范围：1e-4 ~ 5e-4
+lr_scheduler_type: cosine            # 学习率调度器：cosine / linear / constant
+warmup_ratio: 0.03                   # warmup 占总步数比例
+num_train_epochs: 3
+logging_steps: 10
+save_steps: 200
+save_total_limit: 3                  # 最多保留 3 个 checkpoint
+
+### 显存优化
+fp16: false
+bf16: true                           # 使用 BF16 训练
+flash_attn: fa2                      # Flash Attention-2
+gradient_checkpointing: true         # 梯度检查点：用计算换显存
+use_unsloth: false                   # Unsloth 加速（可选）
+
+### 验证配置
+val_size: 0.1                        # 10% 数据用于验证
+per_device_eval_batch_size: 8
+eval_steps: 200
+```
+
+**启动训练命令：**
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+
+# 命令行启动训练
+llamafactory-cli train examples/train_lora/qwen2_lora_fraud.yaml
+
+# 或者使用 Web UI 启动（localhost:7860）
+# llamafactory-cli webui
+```
+
+#### 6.2.4 训练过程中的关键监控指标
+
+```Plaintext
+┌──────────────────────────────────────────────────┐
+│  训练日志关键指标                                  │
+├──────────────────────────────────────────────────┤
+│  - train/loss: 持续下降并稳定在 0.1-0.3 之间     │
+│  - eval/loss: 与训练 loss 差距不大（无过拟合）    │
+│  - grad_norm: 梯度范数稳定，无剧烈震荡             │
+│  - learning_rate: 按 cosine 曲线平滑衰减           │
+│  - 显存占用 (GPU Memory): 稳定在 10-14 GB          │
+└──────────────────────────────────────────────────┘
+```
+
+**避免过拟合的技巧：**
+
+- 将 `lora_dropout` 提高到 0.1
+- 减小 `num_train_epochs` 或增大 `val_size`
+- 增大 `weight_decay`（如 0.01）
+- 若验证 loss 开始上升而训练 loss 持续下降 → 立即停止，回退到最佳 checkpoint
+
+#### 6.2.5 结果量化评估
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+
+# 在测试集上评估，生成详细指标报告
+llamafactory-cli train examples/train_lora/qwen2_lora_fraud.yaml \
+    --do_predict \
+    --predict_with_generate
+```
+
+评估指标（以欺诈文本分类为例）：
+
+- **Accuracy**：整体准确率
+- **Precision / Recall / F1**：重点关注 F1，因为正负样本可能不平衡
+- **混淆矩阵**：分析误判模式（虚假判成真实 vs 真实判成虚假）
+
+#### 6.2.6 模型导出与部署
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+
+# Step 1: 导出 LoRA 适配器（合并/不合并版本）
+llamafactory-cli export \
+    --model_name_or_path /home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct \
+    --adapter_name_or_path /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_qwen/checkpoint-600 \
+    --template qwen \
+    --finetuning_type lora \
+    --export_dir /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_merged \
+    --export_size 2 \
+    --export_device cpu \
+    --export_legacy_format false
+
+# Step 2 (可选): 导出为 GGUF 格式供 llama.cpp 推理
+# llamafactory-cli export \
+#     --model_name_or_path ... \
+#     --export_dir /home/sunlupeng/my-projects/实习/微调/output/fraud_gguf \
+#     --export_format gguf
+```
+
+导出的合并模型目录结构：
+
+```Plaintext
+/home/sunlupeng/my-projects/实习/微调/output/fraud_lora_merged/
+├── config.json
+├── generation_config.json
+├── model.safetensors           # 合并后的完整权重（单文件/分片）
+├── tokenizer.json
+├── tokenizer_config.json
+└── special_tokens_map.json
+```
+
+#### 6.2.7 完整工作流总结
+
+```Plaintext
+数据构建                    模型调优                    结果评估
+   │                          │                          │
+   ▼                          ▼                          ▼
+┌──────────┐            ┌──────────┐              ┌──────────┐
+│ JSON 标注 │  ────────→ │ YAML 配置│ ──────────→ │ 指标报告 │
+│ 数据集    │            │ QLoRA 训练│              │ 混淆矩阵 │
+│ dataset  │            │  checkpoint│              │ 最佳阈值 │
+│ _info注册│            │  保存     │              │          │
+└──────────┘            └──────────┘              └──────────┘
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+              ┌──────────┐        ┌──────────┐
+              │ Merge 导出│        │ GGUF 导出│
+              │ HuggingFace│        │ llama.cpp│
+              └──────────┘        └──────────┘
+```
+
+**关键注意事项总结：**
+
+1. **数据文件命名须与 `dataset_info.json` 中的 `file_name` 严格一致。**
+2. **`template` 参数必须匹配模型系列**（Qwen 用 `qwen`，LLaMA 用 `llama3` 等），否则对话格式错乱。
+3. **`cutoff_len` 不宜过大**——1024 或 2048 对分类任务已足够，过长序列浪费显存且稀释标签信号。
+4. **checkpoint 选择技巧**：不要盲目用最后一个 checkpoint，而是根据 `eval/loss` 最低的步数来选择。
+
+---
+
+## 7. 面试高频考点总结
+
+PEFT 是大模型岗位面试的高频考点之一。本章把候选人在国内大厂（字节、阿里、腾讯、美团、百度）算法岗面试中**实际遇到过**的问题汇总整理，按难度分级。建议至少能脱稿回答下面 7.1 节的 10 道基础题，外加 7.2 节挑 2-3 道进阶题准备深入答案。
+
+### 7.1 必须能脱稿回答的问题
+
+| # | 问题 | 答案要点 |
+|-|-|-|
+| 1 | LoRA 的核心假设是什么？ | 预训练模型在适配下游任务时，权重更新 $\Delta W$ 是低秩的，可用 $BA$ 近似 |
+| 2 | 为什么 B 初始化为零、A 随机初始化？ | 确保训练起始 $\Delta W = 0$，保护预训练知识 |
+| 3 | $\alpha/r$ 的作用？ | 缩放因子，使超参调优与 $r$ 解耦 |
+| 4 | LoRA 通常注入哪些层？为什么？ | Q/K/V/O 投影 + FFN 层；Attention 投影是最核心的语义映射层 |
+| 5 | QLoRA 如何用 4-bit 存储实现全精度效果？ | 存储用 NF4（4-bit 省显存）→ 计算时临时反量化回 FP16（保精度）→ 梯度只流向 FP16 LoRA 分支 |
+| 6 | NF4 比均匀量化的优势在哪？ | 针对正态分布权重优化分位点，零点附近密度更高，信息损失更小 |
+| 7 | P-Tuning v1 和 v2 的核心区别？ | v1 仅 Embedding 层；v2 (Deep Prompt Tuning) 每层插入 |
+| 8 | LoRA vs Full Fine-Tuning 的显存差异来源？ | 不需存储优化器状态（Adam m/v）对冻结参数的副本 + 可训练参数极少 |
+| 9 | 推理时 merge 的好处？ | 消除 LoRA 分支的额外计算开销，前向传播退化为标准线性层 |
+| 10 | 如何为不同任务快速切换 LoRA？ | 保存独立的 adapter 权重（几 MB），推理时按需加载并 merge |
+
+### 7.2 进阶思考题
+
+1. **为什么 LoRA 不适用于训练 Embedding 层？**  
+因为 Embedding 层的输出是离散查找而非连续线性变换，低秩假设不成立。更细致地说，embedding 是一个查找表（lookup table），$W_E$ 的每一行对应一个 token 的向量表示，**整个矩阵的"秩"反映的是词表的多样性而非任务相关性**。下游任务通常不会让所有 token 的表示一起朝同一个方向移动，因此 $\Delta W_E$ 往往是高秩的，低秩近似会严重欠拟合。如果确实需要适配 embedding（比如扩词表），通常的做法是把 embedding 整层加入 `modules_to_save` 而非 LoRA target。
+2. **多 LoRA 模块如何共存（Multi-LoRA serving）？**  
+加载多个任务的 LoRA adapter 到内存，根据请求动态 merge/unmerge 对应 adapter。生产推理框架（vLLM、TGI、SGLang）支持原生的 multi-LoRA serving——多个适配器共享同一份基座（14 GB 只占一次），每个适配器仅几十 MB，可以同时挂载几十甚至上百个。请求到来时按 adapter_name 路由到对应的 LoRA 分支，实现"单基座多任务"的低成本部署。
+3. **LoRA 和 Adapter 的区别？**  
+Adapter 是串联瓶颈层（增加推理延迟）；LoRA 是并联低秩分支（可 merge 消除延迟）。除了延迟差异，两者在反向传播路径上也不同：Adapter 的梯度要"穿过"瓶颈 MLP 才能到达原始层，路径更长；LoRA 旁路与原始层并联，梯度直接流向 $A, B$，路径短、信号清晰。这也是 LoRA 收敛更快的原因之一。
+4. **QLoRA 训练时基座模型的梯度从哪来？**  
+基座模型本身不参与梯度更新——它的 4-bit 权重在反向传播中只用于"反量化提供 $W_{dq}$ 给 LoRA 分支的前向计算"。梯度只在 LoRA 的 $A, B$ 上流动，最终通过优化器（paged_adamw_8bit）更新 $A, B$。整个过程基座的 4-bit 权重始终保持只读。
+5. **为什么 LoRA 训练初期 loss 下降缓慢？**  
+因为 $B=0$ 时 $\frac{\partial \mathcal{L}}{\partial A} = (\alpha/r) \cdot B^\top \cdots = 0$，A 的梯度被截断。只有等 B 累积几步更新后非零，A 才开始有真正的梯度。这种"$B$ 先动、$A$ 跟上"的级联训练让前 20-50 步看上去"几乎不动"。
+6. **DoRA 比 LoRA 强在哪里？**  
+DoRA 把权重分解为幅度和方向两部分，对应"调整能量大小"和"调整能量方向"两个独立维度。LoRA 只用 $BA$ 学习方向的低秩修改，无法精准调整幅度；DoRA 通过额外的可学习幅度向量 $m$ 弥补了这一点。实验表明 DoRA 在 r=8 这种低 rank 设置下能逼近全量微调的效果，而 LoRA 此时通常欠拟合。
+7. **NF4 的"信息论最优"具体意味着什么？**  
+在熵编码意义下，**对一个已知分布的随机变量，按分位数划分的编码能最大化每一 bit 携带的信息量**。NF4 把正态分布的 CDF 等分 16 份，取每份的分位数作为量化级别，这保证了 4-bit 范围内对正态分布权重的编码达到信息论上界。换句话说，再聪明的 4-bit 量化方案，精度也不会超过 NF4。
+8. **训练 LoRA 时 BF16 和 FP16 怎么选？**  
+**BF16 优先**。BF16 与 FP32 数值范围相同（指数位 8 bit），不容易溢出；FP16 的指数位只有 5 bit，最大值约 65504，$BA$ 乘积在 $r$ 较大时容易超出范围导致 inf/NaN。BF16 的代价是尾数精度低（7 bit vs FP16 的 10 bit），但这点精度损失对训练影响微乎其微。建议：A100/H100/RTX 30+ 一律 BF16，V100/T4 必须 FP16。
+9. **如何判断 LoRA 训练是否过拟合？**  
+监控 eval_loss 与 train_loss 的差距。健康训练时两者持续同步下降，差距在 30% 以内；过拟合时 train_loss 继续下降但 eval_loss 开始上升，差距迅速扩大。一旦观察到 eval_loss 上升 2 个连续 step，应立即停止训练并回退到最佳 checkpoint。预防过拟合的手段：增大 `lora_dropout`、减小 `num_train_epochs`、增大 `weight_decay`、扩充数据。
+10. **`prepare_model_for_kbit_training` 这个函数做了什么？**  
+四件事：(1) 把 LayerNorm 强制转 FP32 保证数值稳定；(2) 把 lm_head 转 FP32 避免 softmax 塌缩；(3) 启用 gradient_checkpointing 节省激活值显存；(4) 给 embedding 层加梯度钩子让反向传播能正常工作。**不调用这个函数，QLoRA 训练几乎必然发散**。
+
+### 7.3 系统设计与开放题
+
+下面这些题目通常出现在终面或者高级岗位面试中，考察候选人对工业级 PEFT 系统的整体理解。
+
+**Q1：设计一个支持 100 个任务并发的多 LoRA 推理服务**
+
+参考答案要点：
+
+- 基座模型加载一次（14GB），驻留 GPU 显存
+- 100 个 LoRA 适配器存在磁盘/对象存储，按需 lazy load
+- 内存中维持 LRU 缓存（如 10 个热门适配器）
+- 请求路由：根据 request.task_id 查表得到 adapter_name，对应到 LoRA 权重
+- 关键优化：使用 vLLM / SGLang 的 PagedAttention，支持动态 LoRA 切换不阻塞
+- 监控指标：QPS、p99 延迟、显存占用、适配器命中率
+
+**Q2：基座模型升级后，如何复用旧的 LoRA 适配器？**
+
+参考答案要点：
+
+- **不能直接复用**。LoRA 适配器是针对特定基座训练的，基座的权重 $W_0$ 变了，$\Delta W = BA$ 的语义就失效了
+- **可选方案 1**：用新基座重新跑训练，几小时即可完成（这是工业实践的主流做法）
+- **可选方案 2**：用 LoftQ / PiSSA 风格的"权重感知初始化"，从旧 LoRA 出发但在新基座上做几步增量训练
+- **可选方案 3**：如果旧基座和新基座是"同源版本"（如 Qwen2-7B → Qwen2.5-7B），LoRA 可能勉强可用，但效果会有所降低
+- 实践建议：把 LoRA 训练 pipeline CI 化，新基座一发布就自动触发重训
+
+**Q3：怎么知道一个任务该用什么 r 值？**
+
+参考答案要点：
+
+- **理论指导**：r 应大于等于 $\Delta W$ 的"真实秩"——这个值无法预先知道
+- **经验起步**：从 r=16 开始，分类任务可降到 8，生成任务可升到 32
+- **实证方法**：跑一个小规模实验（5% 数据）扫 r ∈ &#123;4, 8, 16, 32, 64&#125;，画 r vs eval_loss 曲线
+- **自动化方法**：用 AdaLoRA 让模型自动学习每层的最优 r 分配
+- **业务经验**：CV 任务和多模态任务通常需要更大 r（32-128），纯文本分类 r=8 就够
+
+**Q4：解释 QLoRA 论文的核心创新点**
+
+参考答案要点（按重要性排序）：
+
+1. **NF4 量化格式**：信息论最优的 4-bit 编码，针对正态分布权重设计
+2. **双重量化**：对块级 absmax 再做 8-bit 量化，二阶节省显存
+3. **分页优化器**：把不活跃的优化器状态换出到 CPU RAM，避免 OOM
+4. **整体范式**：证明了"4-bit 存储 + 16-bit 计算 + 全精度 LoRA 旁路"这套组合能在精度损失 < 2% 的前提下，把显存压缩 12 倍
+
+**Q5：LoRA 适配器能不能跨模型迁移？**
+
+参考答案要点：
+
+- **同架构不同 checkpoint**：理论上不行，实践中有时勉强可用（效果会下降）
+- **不同架构**：完全不行，layer name 和 shape 都对不上
+- **跨任务复用**：LoRA 是任务专用的，跨任务复用会回到基座行为
+- **想跨模型迁移技能**：合并 LoRA → 用合并后的模型做"教师"做知识蒸馏到新基座
+- 工业实践：把 LoRA 当作"一次性产物"，每个基座+任务组合重新训练
+
+### 7.4 编程实操题
+
+面试中如果遇到编程题，下面三道是最常见的：
+
+**T1：用纯 PyTorch 实现 LoRA 模块**  
+参考第 2.2 节的代码。重点是 forward 中"先 $xA^\top$ 再 $\cdot B^\top$"的计算顺序，以及 B 初始化为零的初始化策略。
+
+**T2：把 LoRA 注入到给定的 nn.Module 中**  
+关键是用 `model.named_modules()` 遍历 + `isinstance(m, nn.Linear)` 过滤 + `setattr(parent, leaf_name, lora_layer)` 替换。
+
+**T3：实现 merge / unmerge 函数**  
+注意 `weight.data += scaling * (B @ A)` 这种就地操作，避免破坏自动求导追踪。
+
+---
+
+## 附录：工作空间目录结构总览
+
+下面是本手册涉及的所有文件、目录、代码、数据的标准位置。把整个项目按这个结构组织，对接团队协作或回顾自己之前的工作时会清晰很多。
+
+```Plaintext
+/home/sunlupeng/my-projects/实习/微调/
+│
+├── PEFT_进阶实战手册.md                    ← 本手册
+│
+├── lora_from_scratch.py                    ← 纯 PyTorch LoRA 手撕代码
+├── peft_lora_demo.py                       ← peft 库标准 LoRA 配置
+│
+├── LLaMA-Factory/                          ← LLaMA-Factory 微调系统
+│   ├── data/
+│   │   ├── dataset_info.json               ← 数据集注册文件
+│   │   └── fraud_detection.json            ← 欺诈检测训练数据
+│   └── examples/
+│       └── train_lora/
+│           └── qwen2_lora_fraud.yaml       ← QLoRA 训练配置文件
+│
+├── models/
+│   └── base_model/                         ← 预训练基座模型存放目录
+│       └── Qwen2-7B-Instruct/
+│
+└── output/
+    ├── lora_adapter/                       ← peft 导出的 LoRA adapter
+    ├── fraud_lora_qwen/                    ← LLaMA-Factory 训练 checkpoint
+    └── fraud_lora_merged/                  ← 合并后的完整模型（部署用）
+```
+
+## 附录 B：推荐论文清单
+
+下面这些论文是 PEFT 领域的核心文献，按"必读 / 推荐 / 选读"三档划分。**必读**类应该精读到能复述核心公式和实验设计；**推荐**类至少看一遍 abstract 和 method；**选读**类可以在工作中遇到具体问题时查阅。
+
+### B.1 必读论文（PEFT 核心方法）
+
+1. **LoRA**: *LoRA: Low-Rank Adaptation of Large Language Models* (Hu et al., 2021, Microsoft)  
+— 整个 PEFT 时代的开山之作，必须精读
+2. **QLoRA**: *QLoRA: Efficient Finetuning of Quantized LLMs* (Dettmers et al., 2023, U. Washington)  
+— 把 LoRA 与 4-bit 量化结合，让消费级显卡微调大模型成为可能
+3. **P-Tuning v2**: *P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally Across Scales and Tasks* (Liu et al., 2022, Tsinghua)  
+— 第一次让 prompt tuning 在中小模型上达到全量微调的水平
+4. **Prefix Tuning**: *Prefix-Tuning: Optimizing Continuous Prompts for Generation* (Li & Liang, 2021, Stanford)  
+— Prompt-based PEFT 的奠基论文之一
+5. **IA3**: *Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning* (Liu et al., 2022)  
+— 极简 PEFT 方法的代表
+
+### B.2 推荐论文（LoRA 变种与改进）
+
+1. **DoRA**: *DoRA: Weight-Decomposed Low-Rank Adaptation* (Liu et al., 2024, NVIDIA)
+2. **AdaLoRA**: *AdaLoRA: Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning* (Zhang et al., 2023)
+3. **LoftQ**: *LoftQ: LoRA-Fine-Tuning-Aware Quantization for Large Language Models* (Li et al., 2024)
+4. **PiSSA**: *PiSSA: Principal Singular Values and Singular Vectors Adaptation* (Meng et al., 2024)
+5. **rsLoRA**: *A Rank Stabilization Scaling Factor for Fine-Tuning with LoRA* (Kalajdzievski, 2023)
+
+### B.3 选读论文（量化与相关技术）
+
+1. **Adapter (原版)**: *Parameter-Efficient Transfer Learning for NLP* (Houlsby et al., 2019, Google)
+2. **GPTQ**: *GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers* (Frantar et al., 2022)
+3. **AWQ**: *AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration* (Lin et al., 2023)
+4. **Prompt Tuning**: *The Power of Scale for Parameter-Efficient Prompt Tuning* (Lester et al., 2021, Google)
+5. **Intrinsic Dimension**: *Intrinsic Dimensionality Explains the Effectiveness of Language Model Fine-Tuning* (Aghajanyan et al., 2020)
+
+### B.4 工具与系统
+
+1. **peft 库官方文档**：https://huggingface.co/docs/peft
+2. **LLaMA-Factory 仓库**：https://github.com/hiyouga/LLaMA-Factory
+3. **bitsandbytes 仓库**：https://github.com/TimDettmers/bitsandbytes
+4. **unsloth 加速库**：https://github.com/unslothai/unsloth
+5. **vLLM 多 LoRA 推理**：https://docs.vllm.ai/en/latest/models/lora.html
+
+---
+
+## 附录 C：训练健康度自查清单
+
+每次 PEFT 训练前，建议按这份清单检查一遍。绝大多数训练失败都是因为下面这些细节没做对。
+
+### C.1 模型与基座
+
+- [ ] 基座模型路径正确，模型文件完整（用 ls -la 确认 .safetensors 文件齐全）
+
+- [ ] trust_remote_code=True 已加上（Qwen / ChatGLM 等需要）
+
+- [ ] 模型加载后 dtype 是预期的（BF16 或 FP16）
+
+- [ ] 如果是 QLoRA，调用了 prepare_model_for_kbit_training
+
+- [ ] 注入 LoRA 后 print_trainable_parameters() 显示的占比在预期范围（0.1%-1%）
+
+### C.2 数据与分词器
+
+- [ ] 分词器的 pad_token 已设置（通常 = eos_token）
+
+- [ ] 数据样本经过 format_chat 后符合对话模板（手动打印几条确认）
+
+- [ ] tokenize_fn 输出的 input_ids 长度合理（不全是 pad，也不全是 truncation）
+
+- [ ] labels 与 input_ids 一致（因果 LM）或正确 mask（指令微调时仅对 assistant 部分算 loss）
+
+- [ ] 训练集和验证集已正确划分（train_test_split 或显式提供）
+
+### C.3 超参数
+
+- [ ] learning_rate 合理（LoRA: 1e-4 \~ 5e-4；Full FT: 1e-5 \~ 5e-5）
+
+- [ ] per_device_train_batch_size × gradient_accumulation_steps 的等效 batch 在 16-64 范围
+
+- [ ] num_train_epochs 不超过 5（更多通常过拟合）
+
+- [ ] warmup_ratio 在 0.03-0.1 之间
+
+- [ ] max_grad_norm=1.0 已设置（防梯度爆炸）
+
+### C.4 显存与精度
+
+- [ ] BF16 或 FP16 二选一已启用（看显卡型号）
+
+- [ ] gradient_checkpointing=True（QLoRA 必须）
+
+- [ ] QLoRA 时 optim="paged_adamw_8bit"
+
+- [ ] 启动训练后第一个 step 显存稳定（如果飙升说明 OOM 临界）
+
+- [ ] Flash Attention 2 已开启（如果硬件支持）
+
+### C.5 训练监控
+
+- [ ] 第一个 step 的 loss 在合理范围（通常 1.0 \~ 3.0，>10 说明数据 / 标签有问题）
+
+- [ ] 前 50 步 loss 缓慢下降（LoRA 特性，不要慌）
+
+- [ ] 100 步后 loss 明显下降趋势
+
+- [ ] eval_loss 与 train_loss 差距 < 50%
+
+- [ ] 梯度范数稳定，无剧烈震荡
+
+- [ ] 显存峰值稳定，无持续增长（增长意味着内存泄漏）
+
+---
+
+## 附录 D：性能基准速查
+
+下面这些数字来自社区与官方实验的实测结果，可以作为你训练计划的参考基线。**注意：实际数字会因硬件、数据集、超参数而异，仅作量级参考。**
+
+### D.1 显存需求（7B 模型，BF16，batch=4）
+
+| 方案 | 训练显存 | 推理显存 |
+|-|-|-|
+| Full Fine-Tuning | 90+ GB | 14 GB |
+| LoRA (r=16) | 18-22 GB | 14.1 GB |
+| QLoRA (NF4) | 9-12 GB | 14.1 GB（合并后） |
+| P-Tuning v2 (m=20) | 17-20 GB | 14.1 GB |
+| IA3 | 16 GB | 14 GB（合并后） |
+
+### D.2 训练速度（A100 80GB，7B 模型）
+
+| 方案 | 步速 (it/s) | 单 epoch（1 万样本） |
+|-|-|-|
+| Full FT | \~0.5 | \~5 小时 |
+| LoRA | \~1.5 | \~1.5 小时 |
+| QLoRA | \~1.0 | \~2.5 小时 |
+| LoRA + Flash Attn 2 | \~2.2 | \~1 小时 |
+| LoRA + Unsloth | \~3.5 | \~40 分钟 |
+
+### D.3 下游任务精度（相对 Full FT 的损失）
+
+| 方法 | MMLU 损失 | HellaSwag 损失 | GSM8K 损失 |
+|-|-|-|-|
+| LoRA (r=16) | -0.5% | -0.3% | -0.8% |
+| QLoRA (NF4) | -1.0% | -0.7% | -1.5% |
+| P-Tuning v2 | -1.5% | -1.2% | -2.5% |
+| IA3 | -2.5% | -2.0% | -4.0% |
+| DoRA (r=8) | -0.2% | -0.1% | -0.4% |
+
+### D.4 适配器文件大小（7B 模型）
+
+| 方法 | 适配器大小 |
+|-|-|
+| Full FT (完整模型) | 14 GB |
+| LoRA r=8 | \~50 MB |
+| LoRA r=16 | \~100 MB |
+| LoRA r=32 | \~200 MB |
+| LoRA r=64 | \~400 MB |
+| P-Tuning v2 (m=20) | \~5 MB |
+| IA3 | \~3 MB |
+
+---
+
+## 附录 E：常见报错速查
+
+下面是 PEFT 训练中最高频的 15 个错误和它们的解决方案。把它们做成查找表，遇到问题时按错误信息快速定位。
+
+| 错误信息 | 根本原因 | 解决方案 |
+|-|-|-|
+| `CUDA out of memory` | 显存不足 | 降 batch；开 gradient_checkpointing；用 QLoRA |
+| Training loss is NaN | FP16 数值溢出 | 换 BF16；调用 `prepare_model_for_kbit_training` |
+| `requires_grad` 全 False | QLoRA 路径错 | 必须先 `prepare_model_for_kbit_training` 再 `get_peft_model` |
+| `pad_token is None` | 分词器没有 pad | `tokenizer.pad_token = tokenizer.eos_token` |
+| 推理输出乱码 | 对话模板不匹配 | `template` 必须与训练时一致 |
+| 加载 LoRA 后效果未变 | 加载顺序错 | 先 `base_model`，再 `PeftModel.from_pretrained` |
+| `flash_attn` 安装失败 | CUDA 版本不匹配 | `pip install flash-attn --no-build-isolation` 或暂时关闭 |
+| `bitsandbytes` 报错 | CUDA / 操作系统不兼容 | 卸载重装；查看 GitHub Issue 找对应版本 |
+| Web UI 端口被占 | 默认 7860 被用 | `llamafactory-cli webui --port 17860` |
+| 多卡训练卡住 | NCCL 通信问题 | `export NCCL_P2P_DISABLE=1` |
+| OOM 在第 N 步 | 序列长度变化大 | 开启 `group_by_length=True` |
+| `inf detected in gradient` | 梯度爆炸 | 加 `max_grad_norm=1.0`；降学习率 |
+| eval_loss 升 train_loss 降 | 过拟合 | 减 epochs；增 dropout；early stop |
+| LoRA 完全没学到东西 | target_modules 选错 | 用 `"all-linear"` 或检查模型层名 |
+| 推理速度比想象的慢 | LoRA 旁路未合并 | 部署前调用 `merge_and_unload()` |
+
+---
+
+## 附录 F：进一步学习路径
+
+读完本手册后，建议按下面这条路径深入：
+
+### F.1 短期（1-2 周）
+
+- **动手跑通本手册的所有代码示例**——尤其是 LoRA from scratch 和 QLoRA 完整 demo
+- **复现 LoRA 论文的核心实验**：在 GLUE 子集上对比 LoRA 与 Full FT
+- **跑通一个完整的 LLaMA-Factory demo**：选一个你感兴趣的小任务（情感分类、风格转换），从数据到部署完整走一遍
+
+### F.2 中期（1-2 月）
+
+- **精读 5 篇核心论文**：LoRA / QLoRA / DoRA / P-Tuning v2 / Prefix Tuning
+- **熟练掌握 peft 库的所有 API**：能写出多任务 multi-LoRA 服务
+- **学习量化生态**：GPTQ / AWQ / SmoothQuant 三种主流推理量化方案
+- **接触 trl 库**：理解 SFT / DPO / PPO 等对齐微调
+
+### F.3 长期（3-6 月）
+
+- **跟踪前沿**：每周浏览一次 PEFT 相关的 arXiv 论文，关注 EMNLP / ACL / ICLR 等顶会
+- **贡献开源**：给 peft 或 LLaMA-Factory 提 PR，无论是文档还是 bug fix
+- **业务落地**：找一个真实业务场景（不是 toy task），完成"数据 → 微调 → 部署 → 监控"全链路
+
+---
+
+**学习与查阅建议**：
+
+本手册的章节相对独立，可以按需查阅。新手建议按 1 → 2 → 3 → 4 → 5 → 6 → 7 顺序读；面试前重点看第 7 章；做工程时重点看第 6 章；遇到具体技术疑惑时查附录 B-E。**最重要的一条经验：所有理论都要配合实际跑代码来验证，纸上谈兵的 PEFT 知识在面试和工作中都站不住脚**。

@@ -3,9 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
+import rehypeKatex from "rehype-katex";
 import rehypePrettyCode from "rehype-pretty-code";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { ArrowLeft, ArrowRight, Clock } from "lucide-react";
 
 import { categoryHref, tagHref, TaxonomyLink } from "@/components/article-card";
@@ -75,10 +77,10 @@ export default async function PostPage({ params }: Props) {
   const { previous, next } = getAdjacentPosts(post.slug);
 
   return (
-    <article className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <article className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <div className="grid gap-12 lg:grid-cols-[minmax(0,760px)_240px] lg:justify-between">
         <div className="min-w-0">
-          <Button asChild variant="ghost" className="-ml-4 mb-8">
+          <Button asChild variant="ghost" className="-ml-3 mb-8">
             <Link href="/blog">
               <ArrowLeft />
               返回文章列表
@@ -92,19 +94,20 @@ export default async function PostPage({ params }: Props) {
             <span className="text-sm text-muted-foreground">
               <time dateTime={post.date}>{formatDate(post.date)}</time>
             </span>
-            <span className="size-1 rounded-full bg-muted-foreground/40" />
+            <span className="h-px w-4 bg-border" />
             <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
               <Clock className="size-4" />
               {post.readingTime}
             </span>
           </div>
 
-          <h1 className="mt-6 text-balance text-5xl font-semibold leading-[1.06] tracking-normal sm:text-6xl">
+          <h1 className="mt-6 text-balance text-4xl font-semibold leading-tight tracking-normal sm:text-5xl">
             {post.title}
           </h1>
-          <p className="mt-6 max-w-3xl text-xl leading-9 text-muted-foreground">
+          <p className="mt-6 max-w-3xl text-lg leading-9 text-muted-foreground">
             {post.description}
           </p>
+          <p className="mt-5 text-sm text-muted-foreground">作者：{post.author}</p>
 
           <div className="mt-8 flex flex-wrap gap-2">
             {post.tags.map((tag) => (
@@ -120,7 +123,7 @@ export default async function PostPage({ params }: Props) {
               components={mdxComponents}
               options={{
                 mdxOptions: {
-                  remarkPlugins: [remarkGfm],
+                  remarkPlugins: [remarkGfm, remarkMath],
                   rehypePlugins: [
                     rehypeSlug,
                     [
@@ -135,7 +138,8 @@ export default async function PostPage({ params }: Props) {
                         theme: "github-dark-dimmed",
                         keepBackground: false
                       }
-                    ]
+                    ],
+                    rehypeKatex
                   ]
                 }
               }}
@@ -148,7 +152,7 @@ export default async function PostPage({ params }: Props) {
             {previous ? (
               <Link
                 href={`/blog/${previous.slug}`}
-                className="rounded-[var(--radius)] border bg-card/70 p-5 transition-colors hover:border-accent"
+                className="rounded-md border bg-card p-5 transition-colors hover:border-accent/60"
               >
                 <span className="text-sm text-muted-foreground">上一篇</span>
                 <span className="mt-2 block font-semibold">{previous.title}</span>
@@ -159,7 +163,7 @@ export default async function PostPage({ params }: Props) {
             {next ? (
               <Link
                 href={`/blog/${next.slug}`}
-                className="rounded-[var(--radius)] border bg-card/70 p-5 text-right transition-colors hover:border-accent"
+                className="rounded-md border bg-card p-5 text-right transition-colors hover:border-accent/60"
               >
                 <span className="text-sm text-muted-foreground">下一篇</span>
                 <span className="mt-2 flex items-center justify-end gap-2 font-semibold">
@@ -174,7 +178,7 @@ export default async function PostPage({ params }: Props) {
         </div>
 
         <aside className="hidden lg:block">
-          <div className="sticky top-24 rounded-[var(--radius)] border bg-card/70 p-5">
+          <div className="sticky top-24 border-l pl-5">
             <p className="text-sm font-medium">目录</p>
             <nav className="mt-4 grid gap-2 text-sm text-muted-foreground">
               {post.toc.length ? (
@@ -182,7 +186,11 @@ export default async function PostPage({ params }: Props) {
                   <a
                     key={item.id}
                     href={`#${item.id}`}
-                    className={item.level === 3 ? "pl-4 hover:text-foreground" : "hover:text-foreground"}
+                    className={
+                      item.level === 3
+                        ? "pl-4 leading-6 hover:text-foreground"
+                        : "leading-6 hover:text-foreground"
+                    }
                   >
                     {item.text}
                   </a>

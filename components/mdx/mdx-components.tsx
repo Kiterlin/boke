@@ -29,10 +29,10 @@ function Callout({
   return (
     <div
       className={cn(
-        "my-6 rounded-[var(--radius)] border p-5 text-sm leading-7",
+        "my-6 max-w-[68ch] rounded-md border p-5 text-sm leading-7",
         tone === "accent"
-          ? "border-accent/40 bg-accent/12"
-          : "bg-secondary/60 text-muted-foreground"
+          ? "border-accent/35 bg-accent/8"
+          : "bg-secondary/55 text-muted-foreground"
       )}
     >
       {children}

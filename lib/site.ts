@@ -8,6 +8,8 @@ export const siteConfig = {
   nav: [
     { href: "/", label: "首页" },
     { href: "/blog", label: "文章" },
+    { href: "/papers", label: "论文" },
+    { href: "/projects", label: "项目" },
     { href: "/tags", label: "标签" },
     { href: "/categories", label: "分类" },
     { href: "/about", label: "关于" },

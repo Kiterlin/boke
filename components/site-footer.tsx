@@ -3,12 +3,14 @@ import Link from "next/link";
 import { siteConfig } from "@/lib/site";
 
 export function SiteFooter() {
+  const footerNav = siteConfig.nav.filter((item) => item.href !== "/");
+
   return (
-    <footer className="border-t">
-      <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[1.2fr_0.8fr] lg:px-8">
+    <footer className="border-t bg-secondary/35">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
         <div>
           <div className="mb-3 flex items-center gap-3">
-            <span className="grid size-8 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+            <span className="grid size-8 place-items-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
               DF
             </span>
             <span className="font-semibold">{siteConfig.name}</span>
@@ -18,7 +20,7 @@ export function SiteFooter() {
           </p>
         </div>
         <div className="flex flex-wrap items-start gap-x-5 gap-y-3 text-sm text-muted-foreground lg:justify-end">
-          {siteConfig.nav.map((item) => (
+          {footerNav.map((item) => (
             <Link key={item.href} href={item.href} className="hover:text-foreground">
               {item.label}
             </Link>

@@ -4,14 +4,21 @@ import { getAllCategories, getAllPosts, getAllTags } from "@/lib/posts";
 import { siteConfig } from "@/lib/site";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const staticRoutes = ["", "/blog", "/tags", "/categories", "/about", "/search"].map(
-    (route) => ({
+  const staticRoutes = [
+    "",
+    "/blog",
+    "/papers",
+    "/projects",
+    "/tags",
+    "/categories",
+    "/about",
+    "/search"
+  ].map((route) => ({
       url: `${siteConfig.url}${route}`,
       lastModified: new Date(),
       changeFrequency: "weekly" as const,
       priority: route === "" ? 1 : 0.75
-    })
-  );
+    }));
 
   const posts = getAllPosts().map((post) => ({
     url: `${siteConfig.url}/blog/${post.slug}`,

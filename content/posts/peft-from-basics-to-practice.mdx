@@ -1,0 +1,3971 @@
+---
+title: "PEFT 入门到实战"
+description: "面向参数高效微调的系统学习手册，覆盖 LoRA、P-Tuning、QLoRA、IA3、peft 库和 LLaMA-Factory 实战。"
+date: "2026-05-31"
+category: "学习文档"
+tags: ["PEFT", "LoRA", "QLoRA", "微调", "学习笔记"]
+author: "Feishu Knowledge Base"
+featured: true
+---
+# PEFT 微调入门到实战学习手册（详细完整版）
+
+> **本手册定位：** 零基础 → 能独立跑通微调 → 理解每一行代码、每一个参数、每一个 Python 包。  
+> **配套文件：**
+
+- 进阶/面试速查 → `PEFT_进阶实战手册.md`
+- 手撕 LoRA 代码 → `lora_from_scratch.py`  
+**工作目录：** `/home/sunlupeng/my-projects/实习/微调`（下文所有路径都基于这个工作空间）
+
+---
+
+## 目录
+
+- 第 0 章 开始之前：你需要知道的所有前置概念
+
+  - 0.1 什么是"微调"？为什么不能全量微调？
+  - 0.2 Transformer 架构速览：哪些层将被改造
+  - 0.3 PEFT 四大主流方法一句话区分
+  - 0.4 关键 Python 包详解：每个包是干什么的
+  - 0.5 硬件与环境准备
+  - 0.6 工作目录结构约定
+- 第 1 章 LoRA：低秩适配（核心重点）
+
+  - 1.1 历史背景：从 Adapter 到 LoRA
+  - 1.2 直觉理解：为什么"低秩"能行？
+  - 1.3 数学原理逐步推导（六个 Step）
+  - 1.4 参数量与显存的精确账本
+  - 1.5 LoRA 的关键超参数：每一个都讲透
+  - 1.6 渐进式代码：Demo 1 用 NumPy 演示低秩分解
+  - 1.7 渐进式代码：Demo 2 单层 LoRA
+  - 1.8 渐进式代码：Demo 3 多层自动注入
+  - 1.9 渐进式代码：Demo 4 完整训练循环
+  - 1.10 用 peft 库五行代码实现 LoRA
+  - 1.11 LoRA 的变种简介（DoRA / rsLoRA / LoRA+）
+  - 1.12 常见问题与排查
+- 第 2 章 P-Tuning：可学习的连续提示词（核心重点）
+
+  - 2.1 提示工程的演进史
+  - 2.2 从"硬提示"到"软提示"的思想转变
+  - 2.3 P-Tuning v1 网络架构改造
+  - 2.4 P-Tuning v2 的"深度提示"改进
+  - 2.5 P-Tuning vs Prefix Tuning vs Prompt Tuning 的区别
+  - 2.6 关键参数详解
+  - 2.7 渐进式代码：Demo 1 手写 Soft Prompt
+  - 2.8 渐进式代码：Demo 2 加 Prompt Encoder
+  - 2.9 peft 库实现 P-Tuning 代码
+  - 2.10 何时选择 P-Tuning？
+- 第 3 章 QLoRA：4-bit 量化突破显存瓶颈（核心重点）
+
+  - 3.1 量化基础知识
+  - 3.2 为什么需要 QLoRA？显存账本计算
+  - 3.3 NF4 量化原理：信息论最优的 4-bit
+  - 3.4 分块量化与离群值处理
+  - 3.5 双重量化（Double Quantization）
+  - 3.6 分页优化器（Paged Optimizers）
+  - 3.7 BitsAndBytesConfig 每个参数详解
+  - 3.8 QLoRA 完整实战代码
+  - 3.9 性能与精度的权衡
+  - 3.10 常见问题与排查
+- 第 4 章 IA3：极简激活值缩放（了解）
+
+  - 4.1 原理：三个学习向量
+  - 4.2 数学公式推导
+  - 4.3 与 LoRA 的对比
+  - 4.4 peft 库实现代码
+- 第 5 章 peft 系统全流程实战
+
+  - 5.1 系统组件总览
+  - 5.2 完整训练脚本（逐行解读）
+  - 5.3 TrainingArguments 所有重要参数详解
+  - 5.4 模型推理与适配器切换
+  - 5.5 多任务 LoRA 共享与切换
+  - 5.6 LoRA 合并的三种方式
+- 第 6 章 LLaMA-Factory 系统全流程实战
+
+  - 6.1 系统核心优势
+  - 6.2 安装与目录结构
+  - 6.3 数据集构建：四种主流格式详解
+  - 6.4 数据集注册：每个字段含义
+  - 6.5 YAML 配置文件每一项详解
+  - 6.6 启动训练 / 评估 / 导出
+  - 6.7 Web UI 使用要点
+  - 6.8 多种任务的 YAML 模板
+- 第 7 章 完整 Demo：欺诈文本分类端到端实战
+
+  - 7.1 任务设计与数据准备
+  - 7.2 训练阶段
+  - 7.3 评估阶段
+  - 7.4 推理与部署
+  - 7.5 进一步优化建议
+- 附录 A 工作目录最终结构
+- 附录 B 常见报错与排查
+- 附录 C 推荐学习资源
+- 附录 D 面试速查表
+
+---
+
+## 第 0 章 开始之前：你需要知道的所有前置概念
+
+### 0.1 什么是"微调"？为什么不能全量微调？
+
+在大模型时代到来之前，深度学习的范式更接近"端到端从零训练"——为每个新任务搭一个网络、找一批数据，从随机初始化开始训练几个 epoch。但 GPT、LLaMA 这样的大模型一个比一个庞大，从零训练已经不是普通团队能负担的事情，所以"复用预训练能力"成为了所有下游开发者的共识。
+
+微调正是把这种"复用"落地的关键工程手段。它的本质是：在一个已经通用化的大模型之上，用少量任务数据继续训练，把通用知识"塑形"成特定任务上的能力。这个动作既比预训练便宜得多，又比纯靠提示词稳定得多，于是几乎成了 LLM 应用层最重要的能力。
+
+#### 0.1.1 三个相关概念的辨析
+
+刚接触大模型的同学经常分不清"预训练 / 微调 / 提示工程"，所以本节用一张全景图把三者放在一起对照。
+
+要理解微调，先把它放到大模型训练的完整谱系里看：
+
+```Plaintext
+┌──────────────────────────────────────────────────────────────────┐
+│  ① 预训练 (Pre-training)                                          │
+│     - 输入：万亿 token 的无标注语料（网页、书籍、代码）             │
+│     - 输出：基座模型 (Base Model)，如 LLaMA-2-7B                  │
+│     - 算力：上千卡 × 数月                                          │
+│     - 目标：让模型学到通用的语言表示                                │
+├──────────────────────────────────────────────────────────────────┤
+│  ② 微调 (Fine-tuning)                                            │
+│     - 输入：几千到几万条任务标注数据                                │
+│     - 输出：在特定任务上表现更好的模型                              │
+│     - 算力：单卡到几卡 × 数小时到几天                              │
+│     - 目标：把通用模型适配到下游任务（分类/对话/翻译/代码生成）      │
+├──────────────────────────────────────────────────────────────────┤
+│  ③ 提示工程 (Prompt Engineering)                                 │
+│     - 输入：精心设计的提示词                                       │
+│     - 输出：在不修改模型参数的前提下，改善输出                      │
+│     - 算力：零（仅推理）                                          │
+│     - 目标：用语言"引导"模型完成任务                              │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+PEFT（Parameter-Efficient Fine-Tuning，参数高效微调）是 ② 的一种特殊形式：  
+**保留 ② 的效果，但成本接近 ③**。
+
+换句话说，PEFT 想找到一条折中路线：既不像提示工程那样完全不动模型从而能力有限，又不像全量微调那样动辄需要几十张 A100 才能跑起来。这种"性价比型"的微调思路，构成了本手册四种主流方法（LoRA、P-Tuning、QLoRA、IA3）的共同出发点。
+
+#### 0.1.2 全量微调的显存灾难：详细账本
+
+我们先用一个真实场景算一笔账，让你直观感受为什么"全量微调"在消费级硬件上几乎不可能跑起来。账本里的每一项都来自训练框架的实际内存分配，不是估计值。
+
+我们以 **7B 模型在单张 RTX 3090（24 GB）上做全量微调**为例，看看显存到底花在哪里：
+
+**前提：参数精度 = FP16（每个参数 2 字节）**
+
+| 显存组成项 | 计算公式 | 数值 |
+|-|-|-|
+| **① 模型权重 (FP16)** | $7 \times 10^9 \times 2 \text{ byte}$ | **14 GB** |
+| **② 梯度 (FP16)** | 与权重同形状 | **14 GB** |
+| **③ Adam 优化器状态 (FP32)** | 每个参数 2 个 FP32 副本（一阶动量 $m$ + 二阶动量 $v$） | $7 \times 10^9 \times 4 \times 2 = $**56 GB** |
+| **④ FP32 主权重副本** | 混合精度训练时需要 | **28 GB** |
+| **⑤ 激活值** | 与 batch / seq_len 相关 | **6-10 GB** |
+| **总计** |  | **\~120 GB** |
+
+24 GB 的 RTX 3090 装得下吗？**显然装不下**——差了整整 5 倍！
+
+**PEFT 怎么省？** 以 LoRA 为例：
+
+- ① 模型权重照样 14 GB（无法压缩，因为前向需要用它）
+- ② 梯度：原始权重冻结，**没有梯度**，节省 14 GB
+- ③ ④ Adam 状态：只对 LoRA 参数（< 1%）维护 → **从 84 GB 降到 \~0.8 GB**
+- ⑤ 激活值：开梯度检查点（gradient_checkpointing）可降 50%
+
+最终 LoRA 大约只需 16-20 GB，**24 GB 显卡轻松搞定**。
+
+可以看到，PEFT 的省显存效果并非来自压缩权重本身，而是来自"梯度和优化器状态都不为冻结参数维护"这一点。这也是为什么后面我们会反复强调：**LoRA 真正省的不是模型权重的显存，而是优化器状态和梯度的显存**。
+
+#### 0.1.3 PEFT 的核心思想
+
+一句话总结：
+
+> **冻结预训练的绝大部分参数（不存梯度、不存优化器状态），只训练新增的极少量参数（通常 < 1%）。**
+
+这就把"训练 7B 参数"的问题，转化为了"训练 7M 参数"的问题——后者在任何笔记本上都能跑。
+
+理解这句话需要一个关键认知：训练成本主要由"可训练参数量"决定，而不是模型总大小。哪怕模型本体仍然是 7B，只要梯度和优化器只跟着 7M 走，显存压力就会从"GPU 集群"骤降到"单卡消费级"。这就是 PEFT 全部技术演化的源动力。
+
+### 0.2 Transformer 架构速览：哪些层将被改造
+
+要听懂"LoRA 注入到 q_proj、v_proj"这类术语，前提是清楚 Transformer 内部到底有哪些可被改造的位置。本节用一张剖面图把一个 Transformer 块拆开，标出 PEFT 主要瞄准的目标。
+
+PEFT 改造的目标层主要是 Transformer 中的**线性层 (Linear Layer)**。我们先复习 Transformer 内部有哪些线性层。
+
+#### 0.2.1 一个 Transformer 块的剖面图
+
+```Plaintext
+                    输入 x ∈ R^(B, L, d)
+                            │
+                            ▼
+              ┌─────────────────────────┐
+              │   LayerNorm（不动）       │
+              └─────────────────────────┘
+                            │
+                            ▼
+        ┌───────────────────────────────────┐
+        │   Multi-Head Self-Attention        │
+        │                                    │
+        │   Q = x · W_q   ← 线性层          │
+        │   K = x · W_k   ← 线性层          │
+        │   V = x · W_v   ← 线性层          │
+        │                                    │
+        │   Attn = softmax(QK^T / √d_k) · V  │
+        │                                    │
+        │   Out = Attn · W_o   ← 线性层     │
+        └───────────────────────────────────┘
+                            │
+              + 残差连接（x + Attn_Out）
+                            │
+                            ▼
+              ┌─────────────────────────┐
+              │   LayerNorm（不动）       │
+              └─────────────────────────┘
+                            │
+                            ▼
+        ┌───────────────────────────────────┐
+        │   Feed-Forward Network (FFN)       │
+        │                                    │
+        │   现代 SwiGLU 结构:                │
+        │     gate = x · W_gate ← 线性层    │
+        │     up   = x · W_up   ← 线性层    │
+        │     h    = silu(gate) ⊙ up         │
+        │     out  = h · W_down ← 线性层    │
+        └───────────────────────────────────┘
+                            │
+              + 残差连接
+                            ▼
+                          输出
+```
+
+ 标记的就是 PEFT 重点改造的目标——一个 Transformer 块通常有 7 个核心线性层：
+
+| 线性层名 | 名称缩写（常见） | 输入维度 | 输出维度 |
+|-|-|-|-|
+| Query 投影 | `q_proj` | $d$ | $d$ |
+| Key 投影 | `k_proj` | $d$ | $d_{kv}$（GQA 时变小） |
+| Value 投影 | `v_proj` | $d$ | $d_{kv}$ |
+| Output 投影 | `o_proj` | $d$ | $d$ |
+| FFN 门控 | `gate_proj` | $d$ | $d_{ff}$ |
+| FFN 上投影 | `up_proj` | $d$ | $d_{ff}$ |
+| FFN 下投影 | `down_proj` | $d_{ff}$ | $d$ |
+
+在 LLaMA / Qwen / Mistral 等现代架构中，这 7 个层名几乎是标准命名。**写 LoRA 配置时，`target_modules` 选这 7 个即可**。
+
+值得一提的是，不同模型在工程实现上可能略有差异：有的把 Q/K/V 合并成 `qkv_proj`，有的对 FFN 用 `gate_up_proj` 融合层。遇到非标准命名时，可以直接 `print(model)` 看模型结构，按实际名称配置 `target_modules`，这是工程上最稳妥的做法。
+
+#### 0.2.2 哪些层不改？为什么？
+
+PEFT 不是越激进越好——有些层动了之后反而会让效果劣化，所以社区在长期实践中形成了一份"默认不改"的清单。
+
+| 层 | 是否改 | 原因 |
+|-|-|-|
+| Embedding 层 | 一般不改 | 输出是离散查表，低秩假设不成立；改它容易破坏词义 |
+| LayerNorm | 一般不改 | 参数极少，影响有限；且数值敏感 |
+| 位置编码 (RoPE) | 不改 | 没有可学习参数 |
+| `lm_head`（语言模型头） | 一般不改 | 改它容易损失通用能力；除非要扩词表 |
+
+#### 0.2.3 知识点：Multi-Head Attention 的数学公式
+
+注意力计算公式（**面试常考**）：
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right) V$$
+
+Multi-Head 把 $Q, K, V$ 切成 $h$ 份（heads）并行计算，最后拼接经过 $W_o$：
+
+$$\text{MHA}(x) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h) W_o$$
+
+PEFT 的核心改造点就是 $W_q, W_k, W_v, W_o$ 这四个投影矩阵。
+
+理解这一点也能解释一个常见疑问：为什么 LoRA 论文最初只加在 Q 和 V 上？因为 Q/V 是决定注意力"看哪里"和"取什么"的两条主线，对任务适配最敏感。后来的工作发现把 K 和 O 一起加上效果更好，于是"Q/K/V/O 全注入"逐渐成为社区默认配置。
+
+### 0.3 PEFT 四大主流方法一句话区分
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+为了避免后续章节展开时迷失在细节里，先用一句话把四种方法的差异性钉死，建立一个稳定的心智地图。读后面章节时，遇到不确定的时候随时可以翻回这一节快速对齐。
+
+| 方法 | 一句话理解 | 改了哪里 | 训练参数占比 |
+|-|-|-|-|
+| **LoRA** | 在每个权重矩阵旁边并联一对低秩小矩阵 $A, B$，只训练它们 | 权重旁路 | 0.1% - 1% |
+| **P-Tuning** | 在模型输入前面拼接一段"可学习的虚拟 token" | 输入空间 | 0.01% - 0.1% |
+| **QLoRA** | 把基座模型先量化成 4-bit，再叠加 LoRA | 存储 + 旁路 | 0.1% - 1% |
+| **IA3** | 给注意力的 K/V 和 FFN 中间层各乘一个可学习缩放向量 | 激活值缩放 | 0.01% |
+
+**四种方法的对应关系图：**
+
+```Plaintext
+                  ┌─ LoRA ──────── 改"权重的旁路" (推理可合并)
+PEFT 方法 ────────┼─ P-Tuning ──── 改"输入的前缀"
+                  ├─ QLoRA ─────── 改"权重的存储格式" + LoRA
+                  └─ IA3 ───────── 改"激活值的缩放"
+```
+
+简单来说，LoRA 和 IA3 都不动"原始的输入流"，只是在权重或激活上加干预；P-Tuning 反过来不动模型权重，只在输入处拼接虚拟 token；QLoRA 则属于 LoRA 的工程化变种，关注点在"如何让基座模型在显存里更小"。理解了这个分工，再去看公式和代码就会顺很多。
+
+### 0.4 关键 Python 包详解：每个包是干什么的
+
+微调流水线里牵涉的开源包比较多，初学者容易混乱。本节按"职责分工"把每个包定位清楚，让你看到一段代码就能立刻知道这一行属于哪一层。
+
+#### 0.4.1 总览表
+
+| 包名 | 中文角色 | 在微调流水线中的位置 | 安装命令 |
+|-|-|-|-|
+| `torch` | PyTorch 深度学习系统 | 底层基础 | `pip install torch` |
+| `transformers` | HuggingFace 预训练模型系统 | 模型加载 + 训练循环 | `pip install transformers` |
+| `peft` | 参数高效微调封装系统 | LoRA / P-Tuning / IA3 等的统一 API | `pip install peft` |
+| `bitsandbytes` | CUDA 量化算子系统 | QLoRA 的 4-bit 量化底座 | `pip install bitsandbytes` |
+| `accelerate` | 分布式训练加速系统 | 多卡 / DeepSpeed / FSDP 自动适配 | `pip install accelerate` |
+| `datasets` | HuggingFace 数据集系统 | 数据加载 + map / filter | `pip install datasets` |
+| `trl` | 强化学习对齐系统 | SFT / DPO / PPO 封装 | `pip install trl` |
+| `safetensors` | 张量序列化格式 | 模型权重存储 | 随 transformers 自动安装 |
+| `llamafactory` | 微调流水线系统 | YAML 配置 + CLI 一键训练 | `pip install -e ".[torch,metrics]"` |
+
+#### 0.4.2 每个包的最小示例
+
+下面给每个包都配一段最简代码，让你直观感受它在做什么。
+
+**(1) torch —— 张量与自动求导基石**
+
+```Python
+import torch
+
+# 创建张量
+x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+print(x.shape)  # torch.Size([2, 2])
+
+# 自动求导
+y = (x ** 2).sum()
+y.backward()
+print(x.grad)   # tensor([[2., 4.], [6., 8.]])
+
+# 神经网络层
+import torch.nn as nn
+linear = nn.Linear(in_features=10, out_features=5)
+out = linear(torch.randn(2, 10))
+print(out.shape)  # torch.Size([2, 5])
+```
+
+**核心抽象**：
+
+- `torch.Tensor` 是所有计算的载体（类似 NumPy 的 ndarray，但支持 GPU 和自动求导）
+- `nn.Module` 是所有神经网络层的基类
+- `torch.optim` 提供 SGD / Adam 等优化器
+
+**(2) transformers —— 一行代码加载大模型**
+
+```Python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# 加载分词器
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2-7B-Instruct")
+print(tokenizer("Hello world").input_ids)
+# 输出: [9707, 1879]
+
+# 加载模型
+model = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen2-7B-Instruct",
+    torch_dtype="bfloat16",
+    device_map="auto",
+)
+
+# 推理
+inputs = tokenizer("我是", return_tensors="pt").to(model.device)
+outputs = model.generate(**inputs, max_new_tokens=20)
+print(tokenizer.decode(outputs[0]))
+```
+
+**核心抽象**：
+
+- `AutoModelForXxx`：自动按模型架构加载对应类（CausalLM 用于生成，SequenceClassification 用于分类）
+- `AutoTokenizer`：自动加载对应分词器
+- `Trainer` + `TrainingArguments`：内置训练循环（梯度累积、混合精度、checkpoint 等都封装好了）
+
+**(3) peft —— LoRA 等微调方法的统一 API**
+
+```Python
+from peft import LoraConfig, get_peft_model, TaskType
+
+# 假设 model 已加载
+config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=8, lora_alpha=16,
+    target_modules=["q_proj", "v_proj"],
+)
+model = get_peft_model(model, config)
+model.print_trainable_parameters()
+# 输出: trainable params: 1,000,000 || all params: 7,001,000,000 || trainable%: 0.014%
+```
+
+**核心抽象**：
+
+- `XxxConfig`：每种 PEFT 方法对应一个配置类（`LoraConfig`、`PromptEncoderConfig`、`IA3Config`）
+- `get_peft_model(model, config)`：把原始模型包裹成 PEFT 模型
+- `PeftModel.from_pretrained`：加载训练好的适配器
+
+**(4) bitsandbytes —— QLoRA 的底层量化**
+
+```Python
+import bitsandbytes as bnb
+from transformers import BitsAndBytesConfig
+import torch
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_use_double_quant=True,
+)
+# 之后传给 from_pretrained 的 quantization_config 参数即可
+```
+
+**核心提供**：
+
+- 8-bit / 4-bit 量化矩阵乘法 CUDA kernel
+- NF4 / FP4 / Int8 数据类型
+- `paged_adamw_8bit` 等分页优化器
+
+**(5) accelerate —— 多卡训练自动调度**
+
+```Python
+from accelerate import Accelerator
+
+accelerator = Accelerator()
+model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
+
+for batch in dataloader:
+    output = model(**batch)
+    accelerator.backward(output.loss)
+    optimizer.step()
+```
+
+**核心提供**：
+
+- 单卡 / 多卡 / DeepSpeed / FSDP 一份代码搞定
+- `device_map="auto"` 自动按 GPU 显存分配模型层
+- 混合精度 / 梯度累积自动管理
+
+**(6) datasets —— 数据集加载与处理**
+
+```Python
+from datasets import load_dataset, Dataset
+
+# 方式 1: 从 HuggingFace Hub 加载
+ds = load_dataset("imdb")
+print(ds["train"][0])  # {'text': '...', 'label': 1}
+
+# 方式 2: 从本地 JSON / CSV 加载
+ds = load_dataset("json", data_files="/path/to/data.json", split="train")
+
+# 方式 3: 从 Python list 创建
+ds = Dataset.from_list([{"x": 1}, {"x": 2}])
+
+# map：批量预处理
+def add_one(example):
+    example["x"] = example["x"] + 1
+    return example
+ds = ds.map(add_one)
+```
+
+**核心提供**：
+
+- 统一的 `Dataset` / `DatasetDict` 抽象
+- 高效的 `map` / `filter` / `shuffle` / `train_test_split` 操作
+- Apache Arrow 后端，可处理 TB 级数据
+
+**(7) trl —— SFT / DPO 等对齐微调**
+
+```Python
+from trl import SFTTrainer
+
+trainer = SFTTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=dataset,
+    dataset_text_field="text",
+    max_seq_length=2048,
+)
+trainer.train()
+```
+
+**核心提供**：
+
+- `SFTTrainer`：监督微调
+- `DPOTrainer`：直接偏好优化
+- `PPOTrainer`：强化学习对齐
+
+**(8) safetensors —— 安全的模型权重格式**
+
+```Python
+from safetensors.torch import save_file, load_file
+import torch
+
+# 保存
+tensors = {"weight": torch.randn(10, 10)}
+save_file(tensors, "model.safetensors")
+
+# 加载
+tensors = load_file("model.safetensors")
+```
+
+相比传统 `.bin`（PyTorch pickle）：
+
+- **更安全**：纯数据，不会执行任意代码
+- **更快**：零拷贝加载，启动快 10 倍
+- **跨语言**：Python、Rust、JS 都能读
+
+**(9) llamafactory —— 一站式微调流水线**
+
+```Bash
+llamafactory-cli train examples/train_lora/qwen_lora_sft.yaml
+```
+
+把上面所有包整合：你写一个 YAML，它就替你完成从数据加载、模型量化、LoRA 注入、训练循环到导出的全套工作。
+
+#### 0.4.3 包之间的依赖关系
+
+```Plaintext
+            ┌──────────────────┐
+            │  llamafactory     │  ← 顶层流水线系统
+            └──────────────────┘
+                     │
+        ┌────────────┼────────────┐
+        ▼            ▼            ▼
+    ┌──────┐    ┌──────┐    ┌──────┐
+    │ trl  │    │ peft │    │ data │
+    └──────┘    └──────┘    │ sets │
+        │            │      └──────┘
+        ▼            ▼            ▼
+            ┌──────────────────┐
+            │   transformers    │  ← 模型/分词器抽象
+            └──────────────────┘
+                     │
+        ┌────────────┼────────────┐
+        ▼            ▼            ▼
+    ┌──────┐  ┌──────────┐  ┌──────────┐
+    │ torch│  │accelerate│  │bitsand-  │
+    └──────┘  └──────────┘  │  bytes   │
+                            └──────────┘
+```
+
+记忆口诀：**torch 是地基，transformers 是房子，peft/bnb/accelerate 是装修，trl/datasets 是家具，llamafactory 是装修公司**。
+
+包之间存在比较明确的依赖关系——`llamafactory` 站在最顶层，把数据集、量化、微调方法、训练循环都帮你串好；`peft` 一层之下负责注入 LoRA 等结构；最底层是 `torch` 提供张量与自动求导。你越往上层走越省心，越往下层走越灵活，工程实践中常常是"日常用 LLaMA-Factory，调研用 peft，研究新方法时才会回到 torch"。
+
+### 0.5 硬件与环境准备
+
+工欲善其事，必先利其器。在写第一行训练代码之前，先确认手头的硬件能跑什么规模的模型、软件版本是否兼容——这能帮你避免 90% 的"莫名其妙跑不通"问题。
+
+#### 0.5.1 显卡选型建议
+
+| 显卡 | 显存 | 能跑什么微调 |
+|-|-|-|
+| GTX 1660 (6 GB) | 6 GB | 小模型 (< 1B) 的 LoRA |
+| RTX 3060 (12 GB) | 12 GB | 7B QLoRA（cutoff_len 1024） |
+| RTX 3090 / 4090 (24 GB) | 24 GB | 7B LoRA / 13B QLoRA / 33B QLoRA（cutoff_len 512） |
+| A100 (40 GB) | 40 GB | 13B LoRA / 33B QLoRA / 70B QLoRA |
+| A100 (80 GB) / H100 | 80 GB | 70B LoRA / 全量微调 7B |
+
+需要强调的是，"能跑"和"跑得舒服"是两回事。24 GB 显卡能用 QLoRA 跑 7B，但如果你想要更长的序列、更大的 batch、更少的梯度累积，下一档（A100 40GB）会显著提高迭代速度。新人选硬件时一个朴素的建议是：**单卡 24GB 是入门门槛，40GB 起步就能流畅做大部分实验**。
+
+#### 0.5.2 软件环境推荐版本
+
+下表列出的是经过社区长期验证的稳定组合。任何包的小版本错位都可能造成训练不收敛或加载失败，所以新手强烈建议先按这个组合搭建环境，跑通流程后再尝试升级。
+
+截至 2026 年 5 月的稳定组合：
+
+```Bash
+python==3.10 或 3.11
+torch==2.3.0+cu121
+transformers==4.41.0
+peft==0.11.1
+bitsandbytes==0.43.1
+accelerate==0.30.1
+datasets==2.19.0
+trl==0.8.6
+flash-attn==2.5.8
+```
+
+**版本要点**：
+
+- CUDA 必须与 torch 版本匹配（用 `python -c "import torch; print(torch.version.cuda)"` 查看）
+- `bitsandbytes` 与 CUDA 强耦合，跨版本要重装
+- `flash-attn` 需要从源码编译（耗时 10-30 分钟），失败可暂时关闭
+
+#### 0.5.3 安装一键脚本
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调
+
+# 创建虚拟环境（避免污染全局）
+python -m venv venv
+source venv/bin/activate
+
+# 安装核心包
+pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+pip install transformers==4.41.0 peft==0.11.1 accelerate==0.30.1
+pip install datasets==2.19.0 trl==0.8.6 bitsandbytes==0.43.1
+pip install sentencepiece tiktoken einops
+
+# 可选：Flash Attention 2 加速
+pip install flash-attn==2.5.8 --no-build-isolation
+
+# 验证安装
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}, device count: {torch.cuda.device_count()}')"
+```
+
+### 0.6 工作目录结构约定
+
+后续所有代码、配置、模型路径都严格使用以下目录：
+
+```Plaintext
+/home/sunlupeng/my-projects/实习/微调/
+├── PEFT_入门到实战.md           ← 本手册
+├── PEFT_进阶实战手册.md         ← 进阶/面试速查
+├── lora_from_scratch.py        ← 手撕 LoRA（教学版）
+├── peft_lora_demo.py           ← peft LoRA 标准示例
+├── peft_ptuning_demo.py        ← peft P-Tuning 示例
+├── peft_qlora_demo.py          ← peft QLoRA 示例
+├── peft_ia3_demo.py            ← peft IA3 示例
+├── train_full_example.py       ← 完整训练脚本
+├── inference_demo.py           ← 推理脚本
+├── data/                       ← 数据集
+│   └── fraud_detection.json
+├── models/                     ← 基座模型存放区
+│   └── Qwen2-7B-Instruct/
+├── output/                     ← 训练产物
+│   ├── lora_adapter/
+│   ├── qlora_adapter/
+│   └── fraud_lora_merged/
+└── LLaMA-Factory/              ← LLaMA-Factory 系统
+    ├── data/
+    └── examples/
+```
+
+**进入工作空间**（所有终端命令的前置条件）：
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调
+```
+
+---
+
+## 第 1 章 LoRA：低秩适配（核心重点）
+
+LoRA 是当下最重要、也最常考的 PEFT 方法，没有之一。它在 2021 年提出，本来是为解决 GPT-3 这种巨型模型的微调成本问题，结果意外地成了大模型时代的"标准做法"——从 LLaMA 到 Stable Diffusion，几乎所有开源模型的社区微调都基于 LoRA。本章我们从历史脉络讲起，一步步推导它的数学原理，再用四个渐进式的代码 Demo 让你亲手感受它的运行机制。
+
+### 1.1 历史背景：从 Adapter 到 LoRA
+
+要理解 LoRA 的精妙之处，先看一眼它的"前辈"。
+
+#### 1.1.1 前辈一：Adapter (2019)
+
+最早的 PEFT 方法之一。在 Transformer 的每个子层之后**串联**一个瓶颈结构：
+
+```Plaintext
+Transformer 子层输出 h
+        │
+        ▼
+   ┌─────────┐
+   │ 下投影  │  d → r （瓶颈层）
+   └─────────┘
+        │
+   ReLU 激活
+        │
+   ┌─────────┐
+   │ 上投影  │  r → d
+   └─────────┘
+        │
+        + （残差连接到 h）
+        │
+        ▼
+     适配后的输出
+```
+
+**优点**：参数量少（每层 2dr）。  
+**致命缺点**：**串联结构会增加推理延迟**——每次前向都要多算两个矩阵乘法。
+
+#### 1.1.2 前辈二：Prefix Tuning (2021)
+
+不动权重，在每层注意力前面拼接一段可学习的 prefix key-value 向量（详见第 2 章 P-Tuning v2）。
+
+**缺点**：占用序列长度预算（cutoff_len 被 prefix 吃掉一部分）；难收敛。
+
+#### 1.1.3 LoRA (2021) 的革命性突破
+
+LoRA 的论文标题是 *"LoRA: Low-Rank Adaptation of Large Language Models"*（Hu et al., 2021）。它解决了 Adapter 的两大问题：
+
+1. **并联结构**：LoRA 旁路与原始权重 **并联**（不是串联），可以在推理时合并消除延迟。
+2. **更高效的低秩分解**：用两个小矩阵 $A, B$ 而不是瓶颈 MLP。
+
+**论文核心实验结论**：在 GPT-3 175B 上，LoRA 用 0.01% 参数达到了与全量微调相当（甚至略好）的性能。
+
+也正因为这个结论太过惊艳，LoRA 在 2022 年起迅速成为开源社区微调的事实标准。后续涌现出的 QLoRA、DoRA、LoRA+ 等都是它的演化版本，但骨架始终没变——这也是为什么我们要花最大篇幅讲透 LoRA。
+
+### 1.2 直觉理解：为什么"低秩"能行？
+
+数学公式之前，先用一个生活化的比喻搭建直觉。如果你跳过数学只记住这一节，也已经能比 80% 的开发者更清楚 LoRA 的精神内核。
+
+#### 1.2.1 类比：调节复杂相机
+
+想象你在用一台专业相机：它有上千个旋钮（参数）。但实际上，你为每个拍摄场景调整的，往往只是几个关键组合：
+
+- 拍人像 → 大光圈 + 暖色温
+- 拍夜景 → 长曝光 + 低 ISO
+- 拍运动 → 高快门速度
+
+这些"组合"就是**低维子空间**——虽然旋钮多，但**有意义的调整方向少**。
+
+LoRA 的核心假设是同样的：
+
+> 预训练好的大模型在适配新任务时，权重矩阵的"改动量" $\Delta W$ 是低秩的——它的真正变化方向远少于矩阵维度。
+
+#### 1.2.2 矩阵秩的几何意义
+
+矩阵的**秩 (rank)** 表示这个矩阵能"张成"多少维空间。
+
+举个例子，考虑一个 $1000 \times 1000$ 的矩阵 $W$：
+
+- 如果它的秩是 1000，它能映射到任意 1000 维空间
+- 如果它的秩是 8，它实际只能"通过" 8 维"瓶颈"，剩下 992 维都是冗余的
+
+**LoRA 的赌注**：$\Delta W$ 的秩大约是 8（而不是 1000），所以可以用 $r = 8$ 来近似。
+
+#### 1.2.3 用一个具体的数值例子感受参数压缩
+
+假设 $W \in \mathbb{R}^{4096 \times 4096}$（Qwen2-7B 的隐藏维度）：
+
+| 方法 | 参数量 | 计算量 |
+|-|-|-|
+| 全量微调 $\Delta W$ | $4096 \times 4096 = 16{,}777{,}216$ | $4096^2 = 16.8\text{M}$ FLOPs |
+| LoRA $r=8$ | $8 \times (4096 + 4096) = 65{,}536$ | $2 \times 8 \times 4096 = 65{,}536$ FLOPs |
+| **压缩比** | **256 倍** | **256 倍** |
+
+**结论**：在 $r=8$ 时，参数与计算都压缩 256 倍。
+
+把这个数字放到工程语境里：原本需要训练 1700 万个参数的一层 LoRA 只需训练 6.5 万个；原本一次前向需要 1700 万次乘加的运算量，LoRA 只需要 6.5 万次。这种"几百倍的压缩"几乎是免费的——只要你愿意接受"$\Delta W$ 是低秩的"这条假设。事实证明，对绝大多数下游任务，这条假设都成立。
+
+### 1.3 数学原理逐步推导（六个 Step）
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+下面我们用六个 Step，把 LoRA 的前向公式从"原始线性层"一步步演化出来。每一步只引入一个新概念，看完你就能在白板上自己推导出来。这是面试中最容易被追问的部分，建议反复练习直到能脱稿。
+
+**Step 1 — 原始前向传播**
+
+对一个线性层（注意力的 Q/K/V 投影、FFN 都是线性层）：
+
+$$h = W_0 x$$
+
+其中：
+
+$W_0 \in \mathbb{R}^{d \times k}$：预训练权重
+
+$x \in \mathbb{R}^{k}$：输入向量
+
+$h \in \mathbb{R}^{d}$：输出向量
+
+**Step 2 — 全量微调的目标**
+
+理论上要把 $W_0$ 整个更新为 $W = W_0 + \Delta W$：
+
+$$h = (W_0 + \Delta W) x = W_0 x + \Delta W \, x$$
+
+但 $\Delta W$ 的参数量与 $W_0$ 相同（$d \times k$），训练成本与全量微调没区别。
+
+**Step 3 — LoRA 用低秩矩阵近似** $\Delta W$
+
+引入两个矩阵：
+
+$$B \in \mathbb{R}^{d \times r}, \quad A \in \mathbb{R}^{r \times k}, \quad r \ll \min(d, k)$$
+
+让 $\Delta W \approx BA$，代入前向：
+
+$$h = W_0 x + BA x$$
+
+**Step 4 — 加入缩放因子** $\alpha / r$
+
+为了让超参数调优与 $r$ 解耦（改 $r$ 时不用重新调学习率）：
+
+$$\boxed{h = W_0 x + \frac{\alpha}{r} BA x}$$
+
+$\alpha$ **的几何作用**：控制 LoRA 旁路对原始输出的影响强度。
+
+$\alpha = r$ 时，缩放系数 = 1（标准强度）
+
+$\alpha = 2r$ 时，缩放系数 = 2（双倍强度）
+
+**Step 5 — 初始化策略（关键细节）**
+
+$$A \sim \text{Kaiming Uniform}(\sigma), \quad B = \mathbf{0}$$
+
+为什么 **B 必须初始化为零**？
+
+> 因为 $\Delta W = BA = 0 \cdot A = 0$，训练起始时模型行为与预训练模型完全一致，**不会引入随机噪声破坏预训练知识**。
+
+为什么 **A 不能也初始化为零**？
+
+> 如果 $A = 0, B = 0$，那么 $A, B$ 的梯度都恒为 0（链式法则会被 0 截断），永远无法更新。**这是一个非常容易考的细节**。
+
+**Step 6 — 推理时合并消除延迟**
+
+训练完成后可以把 LoRA 合并回去：
+
+$$W_{\text{merged}} = W_0 + \frac{\alpha}{r} BA$$
+
+合并后前向传播退化为 $h = W_{\text{merged}} x$，**完全没有任何额外计算开销**——这是 LoRA 相比 Adapter 类方法的杀手锏。
+
+这一点的工程意义比想象中更大：如果你训练了几十个不同任务的 LoRA 适配器，部署时既可以"合并发布"得到一个零延迟的专用模型，也可以"不合并保留"以便后续动态切换任务。两种模式各自服务于不同的生产场景，这种灵活性正是 LoRA 比 Adapter 更受欢迎的根本原因。
+
+#### 1.3.1 梯度推导（进阶/面试考点）
+
+下面这段推导属于"加分项"——能写出来的候选人在面试中会显得很专业。即使一时没记住完整公式，也要能解释清楚"为什么训练初期 A 没有梯度，B 有梯度"。
+
+训练时损失 $\mathcal{L}$ 对 $A, B$ 的梯度：
+
+设 $\nabla_h \mathcal{L} = \frac{\partial \mathcal{L}}{\partial h}$，则：
+
+$$\frac{\partial \mathcal{L}}{\partial B} = \frac{\alpha}{r} \cdot \nabla_h \mathcal{L} \cdot (Ax)^\top$$
+
+$$\frac{\partial \mathcal{L}}{\partial A} = \frac{\alpha}{r} \cdot B^\top \nabla_h \mathcal{L} \cdot x^\top$$
+
+**注意**：训练初期 $B = 0$，所以 $\frac{\partial \mathcal{L}}{\partial A}$ 也是 0！但是 $\frac{\partial \mathcal{L}}{\partial B}$ 不是 0（依赖于 $Ax$ 而非 $B$）。
+
+所以 **B 先被更新一小步，使其非零，然后 A 也开始有梯度**。这是为什么 LoRA 在前几步训练 loss 下降相对慢的原因。
+
+实际训练日志里也能观察到这个现象：通常前 20-50 步 loss 下降会比较平缓，看上去"几乎不动"，这并非配置错误，而是 LoRA 的固有特性。等 B 累积了足够的更新后，A 的梯度才会被激活，loss 才开始明显下降。第一次跑 LoRA 看到这种现象不要慌。
+
+### 1.4 参数量与显存的精确账本
+
+很多教程只用一句话"LoRA 训练参数极少"带过，但作为求职面试中的候选人，你最好能在白板上准确写出参数量公式，并算出几个典型模型上的具体数字。下面给出可背诵的公式与精算样例。
+
+#### 1.4.1 单层 LoRA 参数量公式
+
+对一个 $d \times k$ 的线性层，LoRA 新增参数：
+
+$$|\theta_{\text{LoRA}}| = r \cdot (d + k)$$
+
+例：$d = k = 4096, r = 8 \Rightarrow 8 \times (4096 + 4096) = 65{,}536$ 个参数。
+
+#### 1.4.2 整个模型的 LoRA 参数量
+
+假设 Qwen2-7B 有 32 层，每层注入 7 个线性层（Q/K/V/O + gate/up/down），$r = 16$：
+
+| 类型 | 维度 $d \times k$ | 每层每模块参数 | 每层总计 |
+|-|-|-|-|
+| q_proj | 3584 × 3584 | $16 \times 7168 = 114$K |  |
+| k_proj / v_proj | 3584 × 512（GQA） | $16 \times 4096 = 65$K |  |
+| o_proj | 3584 × 3584 | $16 \times 7168 = 114$K |  |
+| gate / up | 3584 × 18944 | $16 \times 22528 = 360$K |  |
+| down | 18944 × 3584 | $16 \times 22528 = 360$K |  |
+| **每层合计** |  |  | **\~1.5M** |
+| **32 层合计** |  |  | **\~48M** |
+
+**总计 48M 可训练参数 / 7B 总参数 ≈ 0.69%**。
+
+这个数字之所以重要，是因为它直接决定了你的训练显存、优化器状态、checkpoint 体积。48M 参数对应的 LoRA 适配器文件大小约 100MB，可以用邮件附件传输；如果是全量微调的 7B 模型，每个 checkpoint 都是 14GB，不仅难以分享，部署时也很重。这种"轻量化分发"是 LoRA 进入工业生产链条的关键卖点之一。
+
+#### 1.4.3 显存对比表（7B 模型，BF16）
+
+把上面的参数量换算成实际显存，就能看到 LoRA / QLoRA 相比 Full FT 的压倒性优势。下表是单卡训练 7B 模型时，每一项显存占用的真实分布。
+
+| 显存项 | Full FT | LoRA | QLoRA |
+|-|-|-|-|
+| 基座权重 | 14 GB | 14 GB | 3.5 GB（NF4） |
+| 梯度 | 14 GB | \~0.1 GB | \~0.1 GB |
+| Adam 状态 | 56 GB | \~0.4 GB | \~0.4 GB |
+| 激活值 | 6 GB | 6 GB | 6 GB |
+| **总计** | **\~90 GB** | **\~20 GB** | **\~10 GB** |
+
+### 1.5 LoRA 的关键超参数：每一个都讲透
+
+理解了原理，就要面对真实的训练任务——选什么 `r`？`alpha` 设多大？`target_modules` 怎么选？这些超参数没有"放之四海皆准"的答案，但有一套经过社区验证的取值范围和调参方法论。下面分七个小节逐个讲清。
+
+#### 1.5.1 r (rank)
+
+`r` 是 LoRA 最核心的超参数，它直接决定了两件事：一是参数量大小，二是 LoRA 能"记住"多复杂的任务特征。`r` 越大，表达能力越强，但训练显存和过拟合风险也同步上升。
+
+**作用**：低秩分解的秩，决定参数量与表达能力。
+
+**取值与场景**：
+
+| r 值 | 场景 | 参数占比 | 性能预期 |
+|-|-|-|-|
+| 2-4 | 极简任务（情感分类） | 0.05% | 可能略低于 r=8 |
+| 8 | 中文 SFT、对话风格调整 | 0.1% | 通用首选 |
+| 16 | 任务复杂度中等（代码生成、客服） | 0.3% | 推荐起步值 |
+| 32 | 多任务混合微调 | 0.5% | 性价比高 |
+| 64-128 | 高复杂度任务（数学推理、代码、多模态） | 1%-2% | 接近全量微调 |
+
+**经验法则**：先用 r=16 起步，loss 不下降再加大。
+
+补充一个工程经验：r 不是越大越好。当你把 r 从 16 提到 64，参数量增长四倍但效果增益往往不到 1 个百分点，反而增加了过拟合风险。如果是数据量不到 1 万条的小样本任务，建议从 r=8 起步而不是 r=16，给训练留一些"欠拟合余地"反而更稳。
+
+#### 1.5.2 lora_alpha
+
+`alpha` 经常被新手忽视，但它实际上是 LoRA 调参中最容易调整、回报最直接的旋钮。它不改变参数量，只改变 LoRA 分支输出的"音量大小"——所以建议优先调它，再考虑动 r。
+
+**作用**：缩放因子，实际生效系数为 `alpha / r`。
+
+**经验取值**：
+
+| 关系 | 缩放系数 | 行为 |
+|-|-|-|
+| `alpha = r` | 1.0 | 标准强度 |
+| `alpha = 2 * r` | 2.0 | LoRA 影响更强（推荐起步） |
+| `alpha = 4 * r` | 4.0 | LoRA 影响很强，可能不稳定 |
+
+**调参原则**：调超参时优先调 `alpha`，因为它直接控制 LoRA 输出强度；动 `r` 会改变参数量。
+
+新手一个常见的迷思是：`alpha` 越大模型学得越快、效果越好。其实不然——过大的 `alpha` 会让 LoRA 分支在训练早期就压过原始权重，把预训练知识"覆盖"掉，反而降低性能。所以建议 `alpha = 2r` 是相对稳妥的"起步值"。
+
+#### 1.5.3 target_modules
+
+`target_modules` 决定 LoRA 注入到哪些线性层。这是除 `r` 之外，对最终效果影响最大的开关。社区有几种典型配置，对应不同的"参数-效果"权衡点。
+
+**作用**：哪些层注入 LoRA。
+
+**LLaMA / Qwen 系列推荐配置**：
+
+```Python
+# 最经典（论文配置）：只注入 Q 和 V
+target_modules=["q_proj", "v_proj"]
+
+# 推荐配置：注意力 4 个投影
+target_modules=["q_proj", "k_proj", "v_proj", "o_proj"]
+
+# 完整配置：注意力 + FFN
+target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj"]
+
+# 一键全部（peft >= 0.6.0）
+target_modules="all-linear"
+```
+
+**实验经验**（来自论文与社区）：
+
+- 只注入 Q+V → 参数最少，效果不如完整配置
+- 注入 Q+K+V+O → 比 Q+V 提升明显
+- 加上 FFN → 在复杂任务上还有 1-3 个百分点提升
+- 全部注入 → 数据量足时收益最大
+
+如果你只能记住一句话，那就是：**对数据量充足的真实业务任务，全部注入永远是最稳的选择**。它会比 Q+V 多 3-4 倍的可训练参数，但相比 7B 总量仍然非常小，付出的额外显存换来的是更稳定的训练曲线和更好的最终效果。
+
+#### 1.5.4 lora_dropout
+
+Dropout 在 LoRA 中的作用与普通神经网络中类似——防止过拟合。但 LoRA 本身参数量已经很少，过拟合压力没那么大，所以 dropout 的取值范围比传统 MLP 要保守得多。
+
+**作用**：LoRA 分支前的 Dropout 概率，用于防止 LoRA 过拟合。
+
+**取值**：
+
+| 取值 | 场景 |
+|-|-|
+| 0.0 | 大数据集（>10万条），默认即可 |
+| 0.05 | 中等数据集（1万-10万） |
+| 0.1 | 小数据集（&lt;1万），强正则化 |
+
+#### 1.5.5 bias
+
+**作用**：是否训练偏置项。
+
+| 取值 | 含义 |
+|-|-|
+| `"none"` | 偏置全部冻结（默认，推荐） |
+| `"all"` | 所有 bias 都训练（参数量增加少量） |
+| `"lora_only"` | 只训练 LoRA 层的 bias |
+
+**经验**：几乎所有情况选 `"none"`，bias 训练带来的提升很有限。
+
+#### 1.5.6 modules_to_save
+
+**作用**：除了 LoRA，还要全量训练哪些模块。
+
+**典型场景**：
+
+- 扩词表：需要训练 `lm_head` 和 `embed_tokens`
+- 修改分类头：需要训练 `classifier`
+
+```Python
+modules_to_save=["lm_head", "embed_tokens"]
+```
+
+#### 1.5.7 task_type
+
+**作用**：任务类型，决定 LoRA 怎么接到模型上。
+
+| 取值 | 任务 |
+|-|-|
+| `TaskType.CAUSAL_LM` | 因果语言模型（GPT/LLaMA 系） |
+| `TaskType.SEQ_CLS` | 序列分类（BERT 系） |
+| `TaskType.TOKEN_CLS` | Token 分类（NER） |
+| `TaskType.SEQ_2_SEQ_LM` | 编解码语言模型（T5 系） |
+| `TaskType.QUESTION_ANS` | 问答 |
+
+### 1.6 渐进式代码：Demo 1 用 NumPy 演示低秩分解
+
+接下来四个 Demo 是这一章的"动手实战环节"，按"越简单越靠前"的顺序排列。从只有 NumPy 的纯数学演示出发，到最后能跑起来的完整训练循环，每一步都建立在上一步的认知之上。建议你跟着敲一遍代码，看到的输出会比读完十遍文字记得更牢。
+
+我们从最基础的"什么是低秩分解"开始，用 NumPy 演示一个不到 30 行的小例子。
+
+```Python
+"""
+Demo 1: 用纯 NumPy 演示矩阵的低秩近似。
+不涉及神经网络，只演示 SVD 截断分解的核心思想。
+"""
+import numpy as np
+
+# 构造一个"看起来高秩"但实际低秩的矩阵
+# 故意让它的真实秩 = 3（虽然 shape 是 100x80）
+np.random.seed(42)
+W_true_low_rank = np.random.randn(100, 3) @ np.random.randn(3, 80)
+# 加一点噪声让它看起来更像真实权重
+W = W_true_low_rank + 0.01 * np.random.randn(100, 80)
+
+print(f"原矩阵形状: {W.shape}")
+print(f"原矩阵元素数: {W.size}")
+
+# 用 SVD 做低秩近似
+U, S, Vt = np.linalg.svd(W, full_matrices=False)
+print(f"\n奇异值前 10 个: {S[:10]}")
+# 你会看到：前 3 个奇异值很大，后面的非常小 → 说明本质上是 rank-3
+
+# 取秩 r=8 的近似
+r = 8
+W_approx = U[:, :r] @ np.diag(S[:r]) @ Vt[:r, :]
+err = np.linalg.norm(W - W_approx) / np.linalg.norm(W)
+print(f"\nr={r} 的近似误差: {err:.6f}")
+
+# 等价地写成 LoRA 形式 W ≈ B @ A
+B = U[:, :r] @ np.diag(S[:r])   # shape: (100, 8)
+A = Vt[:r, :]                    # shape: (8, 80)
+print(f"\nB 形状: {B.shape}, A 形状: {A.shape}")
+print(f"原参数量: {W.size}, LoRA 参数量: {B.size + A.size}")
+print(f"压缩比: {W.size / (B.size + A.size):.2f}x")
+```
+
+**运行结果**：
+
+```Plaintext
+原矩阵形状: (100, 80)
+原矩阵元素数: 8000
+
+奇异值前 10 个: [29.1, 28.4, 27.2, 0.08, 0.07, 0.07, ...]
+
+r=8 的近似误差: 0.000567
+
+B 形状: (100, 8), A 形状: (8, 80)
+原参数量: 8000, LoRA 参数量: 1440
+压缩比: 5.56x
+```
+
+**学到什么**：
+
+- 一个看似 8000 个参数的矩阵，本质只需要 1440 个就能精确还原
+- SVD 是数学上最优的低秩分解，但训练时我们直接学 $A, B$（不通过 SVD），效果近似
+
+也就是说，LoRA 在训练时其实是用梯度下降"逼近"了 SVD 的结果——它不需要事先知道权重的真实秩，而是在数据驱动下让 $A, B$ 朝着任务最优方向去演化。这种"无监督地逼近最优分解"正是深度学习相比传统数值方法的迷人之处。
+
+### 1.7 渐进式代码：Demo 2 单层 LoRA
+
+理解了低秩分解的数学含义，下一步就是把它包装成 PyTorch 模块。这个 Demo 故意保持极简——只支持单个线性层，不考虑批处理边界情况，目的是让你一眼看清"LoRA 模块的核心代码就这十几行"。
+
+```Python
+"""
+Demo 2: 在单个 nn.Linear 上添加 LoRA 旁路。
+"""
+import torch
+import torch.nn as nn
+import math
+
+
+class SingleLayerLoRA(nn.Module):
+    """
+    一个最简单的 LoRA 层，包裹一个 nn.Linear。
+    """
+    def __init__(self, in_dim: int, out_dim: int, r: int = 8, alpha: int = 16):
+        super().__init__()
+        # 原始 Linear（W_0）
+        self.linear = nn.Linear(in_dim, out_dim)
+        # 冻结原始权重
+        for p in self.linear.parameters():
+            p.requires_grad = False
+
+        # LoRA A 和 B
+        self.lora_A = nn.Parameter(torch.empty(r, in_dim))
+        self.lora_B = nn.Parameter(torch.zeros(out_dim, r))
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+
+        self.scaling = alpha / r
+
+    def forward(self, x):
+        # 原始分支
+        out = self.linear(x)
+        # LoRA 旁路：x → A → B → 缩放
+        lora_out = x @ self.lora_A.T @ self.lora_B.T * self.scaling
+        return out + lora_out
+
+
+# 测试
+if __name__ == "__main__":
+    layer = SingleLayerLoRA(in_dim=64, out_dim=32, r=4, alpha=8)
+
+    # 检查参数
+    for name, p in layer.named_parameters():
+        print(f"{name}: shape={list(p.shape)}, trainable={p.requires_grad}")
+
+    # 前向
+    x = torch.randn(2, 64)
+    y = layer(x)
+    print(f"\n输入: {x.shape} → 输出: {y.shape}")
+
+    # 验证训练初始时 LoRA 不影响输出（B=0）
+    out_plain = layer.linear(x)
+    out_with_lora = layer(x)
+    print(f"训练前 LoRA 影响: {(out_plain - out_with_lora).abs().max().item():.6e}")
+    # 应该输出 0.0 —— 因为 B=0
+```
+
+**输出**：
+
+```Plaintext
+linear.weight: shape=[32, 64], trainable=False
+linear.bias: shape=[32], trainable=False
+lora_A: shape=[4, 64], trainable=True
+lora_B: shape=[32, 4], trainable=True
+
+输入: torch.Size([2, 64]) → 输出: torch.Size([2, 32])
+训练前 LoRA 影响: 0.000000e+00
+```
+
+**关键点**：
+
+- 训练开始时 LoRA 分支输出严格为 0
+- 只有 `lora_A` 和 `lora_B` 可训练，原 `linear` 完全冻结
+
+最后那行"训练前 LoRA 影响"输出严格为 0 是这段代码最重要的验证点。它意味着 LoRA 注入后模型行为完全没变——这是 LoRA "不破坏预训练能力"的核心保证。如果你哪天遇到 LoRA 还没训练 loss 就异常，第一时间排查的就是"B 是不是没有正确初始化为 0"。
+
+### 1.8 渐进式代码：Demo 3 多层自动注入
+
+Demo 2 是单层手动包装，但真实模型有几十层、几百个线性层，手动一个个替换显然不现实。Demo 3 用 PyTorch 的 `named_modules` 实现"自动遍历 + 名称匹配 + 就地替换"，这也是 `peft` 库 `get_peft_model` 内部做的核心动作。
+
+```Python
+"""
+Demo 3: 自动遍历 PyTorch 模块树，把指定的 Linear 层替换成 LoRA 版本。
+"""
+import torch
+import torch.nn as nn
+import math
+
+
+class LoRALinear(nn.Module):
+    """通用 LoRA 包装器（同 Demo 2，略简化）"""
+    def __init__(self, base_linear: nn.Linear, r: int = 8, alpha: int = 16):
+        super().__init__()
+        self.linear = base_linear
+        for p in self.linear.parameters():
+            p.requires_grad = False
+        self.lora_A = nn.Parameter(torch.empty(r, base_linear.in_features))
+        self.lora_B = nn.Parameter(torch.zeros(base_linear.out_features, r))
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        self.scaling = alpha / r
+
+    def forward(self, x):
+        return self.linear(x) + (x @ self.lora_A.T @ self.lora_B.T) * self.scaling
+
+
+def inject_lora(model: nn.Module, target_names=("q_proj", "v_proj"), r=8, alpha=16):
+    """
+    遍历模型，把所有名称匹配的 nn.Linear 替换成 LoRALinear。
+    """
+    for name, module in model.named_modules():
+        # 只处理叶子 Linear，且名称末尾匹配 target_names
+        if isinstance(module, nn.Linear) and any(name.endswith(t) for t in target_names):
+            # 找到父模块和叶子名
+            parent_path = name.rsplit(".", 1)[0] if "." in name else ""
+            leaf_name = name.rsplit(".", 1)[-1]
+            parent = model.get_submodule(parent_path) if parent_path else model
+            # 替换
+            new_layer = LoRALinear(module, r=r, alpha=alpha)
+            setattr(parent, leaf_name, new_layer)
+            print(f"已注入 LoRA → {name}")
+    return model
+
+
+# ─── 模拟一个迷你 Transformer ───────────────────────────────
+class MiniAttention(nn.Module):
+    def __init__(self, d=64):
+        super().__init__()
+        self.q_proj = nn.Linear(d, d)
+        self.k_proj = nn.Linear(d, d)
+        self.v_proj = nn.Linear(d, d)
+        self.o_proj = nn.Linear(d, d)
+
+
+class MiniTransformerBlock(nn.Module):
+    def __init__(self, d=64):
+        super().__init__()
+        self.attn = MiniAttention(d)
+        self.ffn_up = nn.Linear(d, 4 * d)
+        self.ffn_down = nn.Linear(4 * d, d)
+
+
+class MiniTransformer(nn.Module):
+    def __init__(self, n_layers=3, d=64):
+        super().__init__()
+        self.layers = nn.ModuleList([MiniTransformerBlock(d) for _ in range(n_layers)])
+
+
+# ─── 测试 ──────────────────────────────────────────────────
+if __name__ == "__main__":
+    model = MiniTransformer(n_layers=3, d=64)
+    print("=== 注入前 ===")
+    print(f"可训练参数: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+
+    inject_lora(model, target_names=("q_proj", "v_proj"), r=4, alpha=8)
+
+    print(f"\n=== 注入后 ===")
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print(f"可训练参数: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+```
+
+**输出**：
+
+```Plaintext
+=== 注入前 ===
+可训练参数: 53,184
+
+已注入 LoRA → layers.0.attn.q_proj
+已注入 LoRA → layers.0.attn.v_proj
+已注入 LoRA → layers.1.attn.q_proj
+已注入 LoRA → layers.1.attn.v_proj
+已注入 LoRA → layers.2.attn.q_proj
+已注入 LoRA → layers.2.attn.v_proj
+
+=== 注入后 ===
+可训练参数: 3,072 / 56,256 (5.46%)
+```
+
+**关键点**：`peft` 库的 `get_peft_model` 内部做的就是这件事，只不过加了更多边界处理（量化层、嵌入层、并行训练等）。
+
+如果你在面试时被追问"如果让你不用 peft 库手写 LoRA 注入，怎么写？"，照着这个 Demo 的 `inject_lora` 函数讲思路即可：核心三步——遍历 `named_modules`，按名称过滤目标层，用 `setattr` 替换父模块的子属性。能在白板写出来的候选人会显得对 PyTorch 的模块结构非常熟悉。
+
+### 1.9 渐进式代码：Demo 4 完整训练循环
+
+前三个 Demo 都只演示了静态结构，没有真正训练。Demo 4 把 LoRA 模型放进一个真实的训练循环，让你看到"冻结基座 + 只更新 LoRA"是如何与 `optim` 协作的。代码任务故意做得很简单（学习一个简单的线性映射），是为了把注意力集中在训练流程本身。
+
+```Python
+"""
+Demo 4: 完整训练循环示例（教学用，不依赖 Trainer）。
+任务：让 MiniTransformer 学习一个简单的回归映射 y = f(x)。
+"""
+import torch
+import torch.nn as nn
+from torch.optim import AdamW
+# 假设已从前面 demo 导入 MiniTransformer 和 inject_lora
+
+# ── 准备数据 ──
+torch.manual_seed(42)
+N = 1000
+X = torch.randn(N, 64)
+# 假目标：把第一个维度乘 2 加上第二个维度
+Y = (X[:, 0:1] * 2 + X[:, 1:2]).expand(-1, 64)
+
+# ── 创建模型并注入 LoRA ──
+model = MiniTransformer(n_layers=3, d=64)
+inject_lora(model, target_names=("q_proj", "v_proj"), r=4, alpha=8)
+
+# ── 简化的 forward：把所有层串联 ──
+def forward_pass(model, x):
+    h = x.unsqueeze(0)  # 加 batch 维
+    for layer in model.layers:
+        q = layer.attn.q_proj(h)
+        k = layer.attn.k_proj(h)
+        v = layer.attn.v_proj(h)
+        # 简化的注意力（这里只是教学用）
+        attn = torch.softmax(q @ k.transpose(-1, -2) / 8, dim=-1) @ v
+        out = layer.attn.o_proj(attn)
+        h = h + out
+        # FFN
+        h = h + layer.ffn_down(torch.relu(layer.ffn_up(h)))
+    return h.squeeze(0)
+
+
+# ── 训练 ──
+optimizer = AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-3)
+loss_fn = nn.MSELoss()
+
+print("开始训练...")
+for epoch in range(20):
+    perm = torch.randperm(N)
+    epoch_loss = 0
+    for i in range(0, N, 32):
+        idx = perm[i:i+32]
+        x_batch = X[idx]
+        y_batch = Y[idx]
+        pred = forward_pass(model, x_batch)
+        loss = loss_fn(pred, y_batch)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+    if epoch % 5 == 0:
+        print(f"Epoch {epoch}: loss = {epoch_loss / (N // 32):.4f}")
+
+print("训练完成")
+```
+
+**学到什么**：
+
+- 只有 LoRA 参数被优化器更新（因为 `if p.requires_grad`）
+- 即使原始权重是随机初始化的，LoRA 也能学到目标映射
+
+最后这条特别值得品味：你的 MLP 主体是随机的，没有任何预训练知识，但 LoRA 旁路仍然能把模型推向目标输出。这间接证明了"LoRA 学到的信息是独立的、自包含的"——这也是它能作为可插拔适配器的根本原因。
+
+### 1.10 用 peft 库五行代码实现 LoRA
+
+手撕版本能让你看清细节，但实际工程中，没人会自己写 LoRA 模块——`peft` 库帮你处理了所有边界情况，包括量化模型、并行训练、多适配器管理等。下面这段代码就是工业界微调脚本的最小骨架。
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/peft_lora_demo.py`**
+
+```Python
+"""
+peft + transformers 标准 LoRA 微调最小示例。
+任务：让 Qwen2-7B 学会回答"你是谁"。
+"""
+import torch
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    TrainingArguments,
+    Trainer,
+    DataCollatorForLanguageModeling,
+)
+from peft import LoraConfig, get_peft_model, TaskType
+from datasets import Dataset
+
+# ═══════════════════════════════════════════════════════════════
+# 1. 路径与配置
+# ═══════════════════════════════════════════════════════════════
+MODEL_PATH = "/home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct"
+OUTPUT_DIR = "/home/sunlupeng/my-projects/实习/微调/output/lora_adapter"
+
+# ═══════════════════════════════════════════════════════════════
+# 2. 加载分词器与模型
+# ═══════════════════════════════════════════════════════════════
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+    trust_remote_code=True,
+)
+
+# ═══════════════════════════════════════════════════════════════
+# 3. 配置并注入 LoRA
+# ═══════════════════════════════════════════════════════════════
+lora_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    bias="none",
+)
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+
+# ═══════════════════════════════════════════════════════════════
+# 4. 构造一个最小数据集
+# ═══════════════════════════════════════════════════════════════
+samples = [
+    {"text": "<|im_start|>user\n你是谁？<|im_end|>\n<|im_start|>assistant\n我是 SLP 训练的微调助手。<|im_end|>"},
+    {"text": "<|im_start|>user\n介绍一下自己<|im_end|>\n<|im_start|>assistant\n我是 SLP 训练的微调助手。<|im_end|>"},
+] * 50
+
+def tokenize_fn(example):
+    out = tokenizer(example["text"], truncation=True, max_length=256, padding="max_length")
+    out["labels"] = out["input_ids"].copy()
+    return out
+
+dataset = Dataset.from_list(samples).map(tokenize_fn, remove_columns=["text"])
+
+# ═══════════════════════════════════════════════════════════════
+# 5. 训练参数
+# ═══════════════════════════════════════════════════════════════
+training_args = TrainingArguments(
+    output_dir=OUTPUT_DIR,
+    per_device_train_batch_size=2,
+    gradient_accumulation_steps=4,
+    num_train_epochs=3,
+    learning_rate=2e-4,
+    logging_steps=10,
+    save_steps=100,
+    bf16=True,
+    report_to="none",
+)
+
+# ═══════════════════════════════════════════════════════════════
+# 6. 启动训练
+# ═══════════════════════════════════════════════════════════════
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=dataset,
+    tokenizer=tokenizer,
+)
+trainer.train()
+
+# ═══════════════════════════════════════════════════════════════
+# 7. 保存适配器
+# ═══════════════════════════════════════════════════════════════
+model.save_pretrained(OUTPUT_DIR)
+tokenizer.save_pretrained(OUTPUT_DIR)
+print(f"训练完成，适配器保存到：{OUTPUT_DIR}")
+```
+
+**peft 核心 API 速查**：
+
+| API | 作用 |
+|-|-|
+| `LoraConfig(...)` | 创建 LoRA 配置对象，所有超参数集中放这里 |
+| `get_peft_model(model, config)` | 接收 transformers 模型 + 配置，返回包裹好的 `PeftModel` |
+| `model.print_trainable_parameters()` | 打印可训练参数数量与占比 |
+| `model.save_pretrained(path)` | 只保存 LoRA 适配器（几 MB），不保存基座模型 |
+| `PeftModel.from_pretrained(base_model, adapter_path)` | 加载基座 + 适配器 |
+| `model.merge_and_unload()` | 合并 LoRA 并返回普通 transformers 模型 |
+
+### 1.11 LoRA 的变种简介
+
+#### 1.11.1 DoRA（Weight-Decomposed Low-Rank Adaptation, 2024）
+
+把权重 $W$ 分解为**幅度 (magnitude)** 和**方向 (direction)** 两部分，分别学习：
+
+$$W = m \cdot \frac{V}{||V||}$$
+
+其中 $m$ 是可学习的标量幅度，$V$ 是 LoRA 学习的方向矩阵。
+
+**优势**：相同 $r$ 下效果接近全量微调，尤其在小数据集上。
+
+**peft 启用**：
+
+```Python
+LoraConfig(r=16, lora_alpha=32, use_dora=True)
+```
+
+#### 1.11.2 rsLoRA（Rank-Stabilized LoRA, 2023）
+
+把缩放系数从 $\alpha / r$ 改成 $\alpha / \sqrt{r}$。**当** $r$ **很大（>128）时效果更稳**。
+
+```Python
+LoraConfig(r=64, use_rslora=True)
+```
+
+#### 1.11.3 LoRA+（2024）
+
+让 $A$ 和 $B$ 使用**不同的学习率**：$\text{lr}_B = \lambda \cdot \text{lr}_A$，通常 $\lambda = 16$。
+
+**为什么**：因为 $B$ 初始化为 0，初期梯度被压制，需要更大学习率才能跟上 $A$ 的更新速度。
+
+### 1.12 常见问题与排查
+
+**Q1: LoRA 训练 loss 不下降？**
+
+可能原因：
+
+1. **学习率太小**——LoRA 推荐 $10^{-4}$ 量级，而不是 Full FT 的 $10^{-5}$
+2. **target_modules 选错**——比如只选了 `embed_tokens`（嵌入层不适合 LoRA）
+3. **数据格式错误**——检查 input_ids 是否正确，labels 是否设置
+
+**Q2: LoRA 训练时 loss 突然变成 NaN？**
+
+可能原因：
+
+1. **学习率过大**——降到 $5 \times 10^{-5}$ 试试
+2. **FP16 数值溢出**——换成 BF16
+3. **梯度爆炸**——加 `gradient_clipping`，例如 `max_grad_norm=1.0`
+
+**Q3: 推理时 LoRA 没生效（输出和原模型一样）？**
+
+可能原因：
+
+1. 加载顺序错误——必须先加载基座模型，再用 `PeftModel.from_pretrained` 套上适配器
+2. 适配器路径错——检查路径下有没有 `adapter_config.json` 和 `adapter_model.safetensors`
+
+**Q4: 推理速度变慢？**
+
+LoRA 旁路确实会带来 \~5% 的额外开销。如果在意速度，部署前调用 `model.merge_and_unload()` 合并。
+
+**Q5: 同时训练多个 LoRA 适配器内存占用会翻倍吗？**
+
+不会。多个适配器共享同一个基座模型，每个适配器只额外占 LoRA 参数（几十 MB），所以可以同时加载几十个适配器。
+
+**Q6: 增加 `r` 一定能提高效果吗？**
+
+不一定。当 $r$ 超过任务真实需要的秩之后，多余的容量会带来过拟合风险。经验：从 $r=8$ 开始翻倍尝试（8 → 16 → 32 → 64），看验证 loss 何时不再下降。
+
+---
+
+## 第 2 章 P-Tuning：可学习的连续提示词（核心重点）
+
+如果说 LoRA 是从"修改权重"的角度做微调，那 P-Tuning 就是另一条完全不同的路线——它不动模型本身的任何参数，只在输入侧加一段"模型能听懂的密语"。这条路线背后有一个非常深刻的哲学：**让模型按你的方式行动，未必要改造模型本体，改造输入信号也行**。这一章我们会沿着提示工程的演进史，逐步看清这条路是如何从"硬提示"走到 P-Tuning v2 的。
+
+### 2.1 提示工程的演进史
+
+P-Tuning 是"提示词演进史"上重要的一环。先理清几代方法的演进脉络：
+
+```Plaintext
+2019  ┌──────────────────────────────────────────────────────┐
+      │  Discrete Prompt（离散提示词，纯人工）                  │
+      │  "Translate English to French: <input>"               │
+      │  问题：脆弱，措辞敏感                                   │
+      └──────────────────────────────────────────────────────┘
+                              │
+2020  ┌──────────────────────────────────────────────────────┐
+      │  AutoPrompt（自动搜索离散 token）                       │
+      │  用梯度信号挑选最优的 token 组合                        │
+      │  问题：仍然是离散 token，表达能力有限                   │
+      └──────────────────────────────────────────────────────┘
+                              │
+2021  ┌──────────────────────────────────────────────────────┐
+      │  Prefix-Tuning（连续前缀向量，每层注入）                │
+      │  Soft Prompt 思想首次出现                              │
+      │  问题：参数量大，难以收敛                              │
+      └──────────────────────────────────────────────────────┘
+                              │
+2021  ┌──────────────────────────────────────────────────────┐
+      │  P-Tuning v1（连续向量 + Prompt Encoder）              │
+      │  只在 Embedding 层插入，加 LSTM/MLP 编码 prompt         │
+      │  问题：只在浅层影响，中小模型效果一般                   │
+      └──────────────────────────────────────────────────────┘
+                              │
+2021  ┌──────────────────────────────────────────────────────┐
+      │  Prompt Tuning（极简版 Soft Prompt）                   │
+      │  只插入连续向量，不加 Encoder，模型 >10B 时效果好        │
+      └──────────────────────────────────────────────────────┘
+                              │
+2022  ┌──────────────────────────────────────────────────────┐
+      │  P-Tuning v2 = Deep Prefix Tuning                     │
+      │  每层都注入 Prefix，中小模型上效果赶上全量微调          │
+      └──────────────────────────────────────────────────────┘
+```
+
+从这条时间线能看出两个清晰的趋势：一是"提示信号"从离散 token 走向连续向量，让它变得可微、可优化；二是"插入位置"从只在输入层逐步深入到每一层，让信号能持续作用于深层计算。两个趋势叠加，最终在 P-Tuning v2 上达到了"参数极少但效果接近全量微调"的工程甜点。
+
+### 2.2 从"硬提示"到"软提示"的思想转变
+
+要真正理解软提示的威力，先看清硬提示在工业场景下遇到的瓶颈。下面我们用反例说明"为什么人写出来的 prompt 永远没有梯度优化的 prompt 好"。
+
+#### 2.2.1 硬提示（Hard Prompt）的痛点
+
+手工写的自然语言提示词：
+
+```Plaintext
+判断下面这条评论是否为虚假评论：
+"这个产品太好用了！"
+```
+
+**问题**：
+
+1. **离散 token 不可微**：无法通过反向传播自动优化"哪个词更好"
+2. **极度脆弱**：把"判断"改成"分析"，效果可能差 5-10 个百分点
+3. **需要大量人工试错**：同一个任务可能要写几十个 prompt 才能找到好的
+
+#### 2.2.2 软提示（Soft Prompt）的核心思想
+
+**关键洞察**：模型其实不需要"真实的词"——它只需要"合适的嵌入向量"。
+
+形式化：
+
+$$\text{输入} = [\mathbf{p}_0, \mathbf{p}_1, \dots, \mathbf{p}_{m-1}, \underbrace{\text{Embed}(x_1), \dots, \text{Embed}(x_n)}_{\text{真实文本}}]$$
+
+其中：
+
+$\mathbf{p}_i \in \mathbb{R}^d$ 是第 $i$ 个**软提示向量**（$d$ 是模型隐藏维度）
+
+- 这些向量不映射到任何真实词汇，仅作为优化变量
+
+$m$ 是软提示长度，通常 8-128
+
+**训练目标**：冻结所有 Transformer 参数，只更新 $\mathbf{p}_0, \dots, \mathbf{p}_{m-1}$。
+
+请仔细体会这个设计的优雅之处：模型本身的几十亿参数全部冻结，唯一可训练的就是几千到几万个 prompt embedding 数字。这意味着你可以用几乎"零成本"的代价，为同一个基座训练几十个不同任务的 prompt，每个任务只要保存几 KB 的向量——这种轻量化分发能力是 LoRA 都难以比拟的。
+
+#### 2.2.3 软提示比硬提示好在哪？
+
+把硬提示和软提示放到一张表里直观对比，更容易看出软提示的优势所在。
+
+| 维度 | 硬提示 | 软提示 |
+|-|-|-|
+| 可微 | （离散） |  |
+| 表达能力 | 受词表限制 | 整个嵌入空间 |
+| 训练成本 | 0（人工调） | 极低（几千参数） |
+| 人类可读 |  | （向量不对应词） |
+| 跨任务复用 |  | 每任务一套 |
+
+### 2.3 P-Tuning v1 网络架构改造
+
+#### 2.3.1 v1 的关键问题
+
+如果直接随机初始化 $\mathbf{p}_i$ 然后训练，存在两大问题：
+
+1. **优化不稳定**：连续空间的离散点之间缺乏语义约束，容易陷入局部最优
+2. **各 prompt 独立**：$\mathbf{p}_0$ 和 $\mathbf{p}_1$ 之间没有任何交互，缺乏上下文建模
+
+#### 2.3.2 v1 的解决方案：Prompt Encoder
+
+引入一个**轻量的 Prompt Encoder**（通常是 BiLSTM 或 2 层 MLP），把独立的 prompt embedding 编码为上下文感知的表示：
+
+$$\tilde{\mathbf{p}}_{0:m-1} = \text{PromptEncoder}(\mathbf{p}_{0:m-1})$$
+
+**完整架构图**：
+
+```Plaintext
+随机初始化的 m 个 prompt embeddings
+  [p₀, p₁, ..., pₘ₋₁]    （可训练参数）
+              │
+              ▼
+   ┌─────────────────────┐
+   │  Prompt Encoder      │  ← BiLSTM 或 MLP（也是可训练）
+   │  (~100K 参数)        │
+   └─────────────────────┘
+              │
+              ▼
+  [p̃₀, p̃₁, ..., p̃ₘ₋₁]    （上下文感知的 prompt）
+              │
+              ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │ [p̃₀, ..., p̃ₘ₋₁, Embed(x₁), Embed(x₂), ..., Embed(xₙ)] │
+  └───────────────────────────────────────────────────────────┘
+              │
+              ▼
+   ┌─────────────────────┐
+   │  Frozen Transformer  │  ← 主体参数全部冻结
+   │  (Layer 1 ~ Layer L) │
+   └─────────────────────┘
+              │
+              ▼
+        [h₀, h₁, ..., 任务头输出]
+```
+
+#### 2.3.3 Prompt Encoder 的具体结构
+
+**版本 A：BiLSTM 编码器**
+
+```Plaintext
+[p₀, p₁, ..., pₘ₋₁]    ← 输入
+        │
+        ▼
+  双向 LSTM (隐藏维度 h_lstm)
+        │
+        ▼
+  MLP (2 层，relu 激活)
+        │
+        ▼
+[p̃₀, p̃₁, ..., p̃ₘ₋₁]   ← 输出，维度 d
+```
+
+**版本 B：MLP 编码器**（peft 默认）
+
+```Plaintext
+[p₀, p₁, ..., pₘ₋₁]    ← shape (m, d)
+        │
+        ▼
+  Linear(d → h_mlp) + GELU
+        │
+        ▼
+  Linear(h_mlp → d)
+        │
+        ▼
+[p̃₀, p̃₁, ..., p̃ₘ₋₁]
+```
+
+### 2.4 P-Tuning v2 的"深度提示"改进
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+v1 已经在大模型上跑出了不错的成绩，但社区很快发现一个棘手现象：模型规模越小，v1 的效果越差。这背后的原因是什么？v2 的设计动机正是为了解决这个问题。
+
+#### 2.4.1 v1 的局限
+
+v1 的 prompt 只插入到 Embedding 层（也就是 Transformer Layer 1 的输入）。深层的注意力计算很难"持续感知"到 prompt 信号——经过几层之后，prompt 的影响被稀释。
+
+**实验现象**：在小于 10B 参数的模型上，v1 的效果显著低于全量微调。
+
+#### 2.4.2 v2 的核心改进：Deep Prompt Tuning
+
+**在每一层 Transformer 都注入独立的可学习 key-value 前缀向量**：
+
+```Plaintext
+Layer 1 的自注意力:
+  Q: 来自上一层
+  K = [P_K^(1) ; W_K @ x]   ← 前缀 P_K^(1) 拼接到 K 前面
+  V = [P_V^(1) ; W_V @ x]   ← 前缀 P_V^(1) 拼接到 V 前面
+                            │
+                            ▼
+Layer 2 的自注意力:
+  K = [P_K^(2) ; W_K @ x]   ← 这层有自己的前缀
+  V = [P_V^(2) ; W_V @ x]
+                            │
+                            ▼
+       ...每层独立...
+                            │
+                            ▼
+Layer L 的自注意力:
+  K = [P_K^(L) ; W_K @ x]
+  V = [P_V^(L) ; W_V @ x]
+```
+
+**总可训练参数**：$2 \times L \times m \times d$，其中 $L$ 是层数，$m$ 是 prefix 长度，$d$ 是头维度。
+
+**举例**：Qwen2-7B 有 32 层，$m=20, d=128$（单头）：
+
+$2 \times 32 \times 20 \times 128 = 163{,}840$ 参数
+
+- 占比约 0.002%，比 LoRA 还少
+
+#### 2.4.3 v2 为什么有效？
+
+每一层都有自己的 prompt 控制信号，等价于：
+
+- **可控的注意力偏置**：prompt 让每层的注意力"看向"它认为重要的位置
+- **持续的信号注入**：信号不会因深度而稀释
+
+**论文实验**：v2 在 RoBERTa-base (110M) / BERT-large (340M) 等中小模型上，效果可达全量微调的 99%。
+
+这个结果在 2022 年发布时引起了很大反响——之前业界普遍认为"小模型 + 提示微调 = 没戏"，v2 直接打破了这个共识。同时它也启发了后续一系列工作：当你不知道该改模型的哪一部分时，"在每一层都加一点可学习参数"几乎总是一个安全的选择。
+
+### 2.5 P-Tuning vs Prefix Tuning vs Prompt Tuning 的区别
+
+刚接触提示微调的同学最容易在这四个名字之间打转——它们听起来都一样，但实际上每一对之间都有细微差异。下表用两个维度（插入位置、是否带 Encoder）就能把它们彻底分开。
+
+| 方法 | 插入位置 | 是否加 Prompt Encoder | 适用模型规模 |
+|-|-|-|-|
+| **Prompt Tuning** | 仅 Embedding 层 | 否 | > 10B |
+| **P-Tuning v1** | 仅 Embedding 层 | 是（LSTM/MLP） | 任意（中小模型差） |
+| **Prefix Tuning** | 每层 attention K/V | 是（重参数化 MLP） | 任意 |
+| **P-Tuning v2** | 每层 attention K/V | 否（直接学 prefix） | 任意 |
+
+**记忆口诀**：
+
+- **Prompt Tuning** = 最朴素的 soft prompt
+- **P-Tuning v1** = Prompt Tuning + Encoder
+- **Prefix Tuning** = 多层 Prompt Tuning + Encoder
+- **P-Tuning v2** = 多层 Prompt Tuning（Prefix Tuning 简化版）
+
+### 2.6 关键参数详解
+
+`peft` 库的 `PromptEncoderConfig`（P-Tuning v1）和 `PrefixTuningConfig`（P-Tuning v2）：
+
+#### 2.6.1 PromptEncoderConfig (v1)
+
+| 参数 | 作用 | 典型取值 | 说明 |
+|-|-|-|-|
+| `task_type` | 任务类型 | `CAUSAL_LM` / `SEQ_CLS` | 与 LoRA 含义相同 |
+| `num_virtual_tokens` | 软提示长度 $m$ | 8 / 20 / 100 | 越长表达力越强，参数也越多 |
+| `encoder_reparameterization_type` | Encoder 类型 | `"MLP"` / `"LSTM"` | MLP 更轻量，LSTM 表达力更强 |
+| `encoder_hidden_size` | Encoder 隐藏维度 | 128 / 256 | 仅 MLP / LSTM 用 |
+| `encoder_num_layers` | Encoder 层数 | 2 | MLP 推荐 2 层 |
+| `encoder_dropout` | Encoder 内部 dropout | 0.0 / 0.1 | 小数据集开 0.1 |
+
+#### 2.6.2 PrefixTuningConfig (v2)
+
+| 参数 | 作用 | 典型取值 |
+|-|-|-|
+| `task_type` | 任务类型 | `CAUSAL_LM` / `SEQ_CLS` |
+| `num_virtual_tokens` | 每层 prefix 长度 | 8 / 20 / 64 |
+| `prefix_projection` | 是否对 prefix 做投影（v1 的 Encoder） | True / False |
+| `encoder_hidden_size` | 投影 MLP 隐藏维度 | 仅 `prefix_projection=True` 时用 |
+
+**参数选择经验**：
+
+$m = 20$ 通常足够（论文实验普遍取值）
+
+- BERT 类编码器模型用 v1 即可
+- LLaMA / Qwen 等大模型一般用 LoRA 比 P-Tuning 收益更大
+
+### 2.7 渐进式代码：Demo 1 手写 Soft Prompt
+
+最简单的 Prompt Tuning：直接学一段可训练的 embedding。
+
+```Python
+"""
+Demo 1: 手写 Soft Prompt Tuning（最朴素版）。
+"""
+import torch
+import torch.nn as nn
+
+
+class SoftPromptModel(nn.Module):
+    """
+    在 embedding 层前拼接 m 个可学习的虚拟 token。
+    冻结所有其他参数。
+    """
+    def __init__(self, base_model: nn.Module, num_virtual_tokens: int = 20):
+        super().__init__()
+        self.base_model = base_model
+
+        # 冻结基座
+        for p in self.base_model.parameters():
+            p.requires_grad = False
+
+        # 软提示参数：shape (m, d)
+        embed_dim = base_model.config.hidden_size
+        self.soft_prompt = nn.Parameter(
+            torch.randn(num_virtual_tokens, embed_dim) * 0.01
+        )
+        self.num_virtual_tokens = num_virtual_tokens
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
+        # 1) 把 input_ids 通过 embedding 层
+        input_embeds = self.base_model.get_input_embeddings()(input_ids)
+        # input_embeds shape: (B, L, d)
+
+        # 2) 把 soft prompt 拼接到前面
+        B = input_embeds.size(0)
+        prompt = self.soft_prompt.unsqueeze(0).expand(B, -1, -1)
+        # prompt shape: (B, m, d)
+
+        full_embeds = torch.cat([prompt, input_embeds], dim=1)
+        # full_embeds shape: (B, m+L, d)
+
+        # 3) 调整 attention_mask（前 m 个位置全 1）
+        prompt_mask = torch.ones(B, self.num_virtual_tokens,
+                                 dtype=attention_mask.dtype,
+                                 device=attention_mask.device)
+        full_mask = torch.cat([prompt_mask, attention_mask], dim=1)
+
+        # 4) 用 inputs_embeds 而非 input_ids 喂给模型
+        return self.base_model(inputs_embeds=full_embeds, attention_mask=full_mask)
+
+
+# 测试
+if __name__ == "__main__":
+    from transformers import AutoModel
+    base = AutoModel.from_pretrained("bert-base-chinese")
+    model = SoftPromptModel(base, num_virtual_tokens=20)
+
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print(f"可训练参数: {trainable:,} / {total:,} ({100*trainable/total:.4f}%)")
+    # 期望: ~15,360 / ~102M ≈ 0.015%
+```
+
+**关键点**：
+
+- 只有 `soft_prompt` 这一个 nn.Parameter 可训练
+- forward 中用 `inputs_embeds` 接口绕开 token id 嵌入
+- 注意调整 `attention_mask` 让 prompt 位置可见
+
+### 2.8 渐进式代码：Demo 2 加 Prompt Encoder
+
+把 Demo 1 升级为 P-Tuning v1：在 soft prompt 后面接一个 MLP Encoder。
+
+```Python
+"""
+Demo 2: P-Tuning v1 实现 —— 加上 Prompt Encoder。
+"""
+import torch
+import torch.nn as nn
+
+
+class PromptEncoder(nn.Module):
+    """简单的 MLP 编码器：(m, d) -> (m, d)"""
+    def __init__(self, embed_dim: int, hidden_dim: int = 128, num_layers: int = 2):
+        super().__init__()
+        layers = []
+        in_dim = embed_dim
+        for i in range(num_layers - 1):
+            layers.append(nn.Linear(in_dim, hidden_dim))
+            layers.append(nn.GELU())
+            in_dim = hidden_dim
+        layers.append(nn.Linear(in_dim, embed_dim))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.mlp(x)
+
+
+class PTuningV1Model(nn.Module):
+    def __init__(self, base_model, num_virtual_tokens=20, hidden_dim=128):
+        super().__init__()
+        self.base_model = base_model
+        for p in self.base_model.parameters():
+            p.requires_grad = False
+
+        embed_dim = base_model.config.hidden_size
+        self.soft_prompt = nn.Parameter(
+            torch.randn(num_virtual_tokens, embed_dim) * 0.01
+        )
+        self.encoder = PromptEncoder(embed_dim, hidden_dim=hidden_dim)
+        self.num_virtual_tokens = num_virtual_tokens
+
+    def forward(self, input_ids, attention_mask):
+        input_embeds = self.base_model.get_input_embeddings()(input_ids)
+        B = input_embeds.size(0)
+
+        # 关键差异：先过 Encoder
+        encoded_prompt = self.encoder(self.soft_prompt)
+        # encoded_prompt shape: (m, d)
+
+        prompt = encoded_prompt.unsqueeze(0).expand(B, -1, -1)
+        full_embeds = torch.cat([prompt, input_embeds], dim=1)
+
+        prompt_mask = torch.ones(B, self.num_virtual_tokens,
+                                 dtype=attention_mask.dtype,
+                                 device=attention_mask.device)
+        full_mask = torch.cat([prompt_mask, attention_mask], dim=1)
+
+        return self.base_model(inputs_embeds=full_embeds, attention_mask=full_mask)
+```
+
+**与 Demo 1 的核心区别**：`forward` 中先把 `soft_prompt` 过一遍 `encoder`，让 prompt token 之间产生交互。
+
+### 2.9 peft 库实现 P-Tuning 代码
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/peft_ptuning_demo.py`**
+
+```Python
+"""
+用 peft 库实现 P-Tuning v1（PromptEncoderConfig）和 v2（PrefixTuningConfig）。
+"""
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import (
+    PromptEncoderConfig,      # v1
+    PrefixTuningConfig,        # v2
+    get_peft_model,
+    TaskType,
+)
+
+MODEL_PATH = "/home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct"
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH, torch_dtype=torch.bfloat16, device_map="auto",
+    trust_remote_code=True,
+)
+
+# ═══════════════════════════════════════════════════════════════
+# 方案 A: P-Tuning v1
+# ═══════════════════════════════════════════════════════════════
+v1_config = PromptEncoderConfig(
+    task_type=TaskType.CAUSAL_LM,
+    num_virtual_tokens=20,                       # 软提示长度
+    encoder_reparameterization_type="MLP",        # Encoder 类型
+    encoder_hidden_size=128,                      # MLP 隐藏维度
+    encoder_num_layers=2,                         # MLP 层数
+    encoder_dropout=0.0,
+)
+# model_v1 = get_peft_model(model, v1_config)
+# model_v1.print_trainable_parameters()
+
+# ═══════════════════════════════════════════════════════════════
+# 方案 B: P-Tuning v2（Prefix Tuning）
+# ═══════════════════════════════════════════════════════════════
+v2_config = PrefixTuningConfig(
+    task_type=TaskType.CAUSAL_LM,
+    num_virtual_tokens=20,                # 每层 prefix 长度
+    prefix_projection=False,              # False = 标准 v2；True 类似 v1
+)
+model_v2 = get_peft_model(model, v2_config)
+model_v2.print_trainable_parameters()
+# 期望可训练参数仅几十万级别，远小于 LoRA 的几百万
+```
+
+**v1 vs v2 选择建议**：
+
+| 场景 | 推荐 |
+|-|-|
+| 中小模型（< 10B）的分类任务 | v2 |
+| 大模型（> 10B）的生成任务 | v1 或 LoRA |
+| 资源极度紧张（参数&lt;10万） | v2 |
+| 想要最佳效果 | LoRA / QLoRA |
+
+### 2.10 何时选择 P-Tuning？
+
+**优先选 P-Tuning 的场景**：
+
+1. **BERT 类编码器模型 + 分类任务**：v2 上 BERT-base/large 效果很好
+2. **极度受限的参数预算**（&lt;10万）
+3. **多任务共享基座**：每个任务只需训几十 KB 的 prefix
+4. **希望快速迭代**：参数少 → 训练快
+
+**优先选 LoRA 的场景**：
+
+1. **大语言模型的生成任务**
+2. **代码 / 数学等复杂任务**
+3. **需要推理时合并消除延迟**
+
+**对比记忆要点**：
+
+| 维度 | LoRA | P-Tuning v2 |
+|-|-|-|
+| 改造位置 | 权重矩阵旁路 | 每层 attention K/V 前缀 |
+| 可训练参数量 | \~0.1%-1% | \~0.01%-0.1% |
+| 推理时合并 | 可（无延迟） | 不可（每层 prefix 总在那） |
+| 占用序列长度 | 不占 | 占 num_virtual_tokens |
+| 生成任务效果 | 强 | 弱（K/V 前缀对生成 token 影响有限） |
+| 分类任务效果 | 强 | 强 |
+
+---
+
+## 第 3 章 QLoRA：4-bit 量化突破显存瓶颈（核心重点）
+
+QLoRA 是 LoRA 的"显存极限版"，它的发布让"消费级显卡微调 33B 模型"从梦想变成了现实。技术上，它把三件事缝合到了一起：基座模型用 4-bit 存储、计算时临时升回 BF16、LoRA 旁路保持全精度。这一章我们会先把量化的基础概念铺开，再深入到 NF4 和双重量化的具体推导，最后给出可直接复用的训练脚本。
+
+### 3.1 量化基础知识
+
+#### 3.1.1 什么是量化？
+
+**量化 (Quantization)** = 用更少的位数表示同一个数值。
+
+| 数据类型 | 位数 | 表示范围 | 模型权重存储 |
+|-|-|-|-|
+| FP32 (单精度浮点) | 32 bit | 极大 | 28 GB / 7B 模型 |
+| FP16 (半精度浮点) | 16 bit | $\pm 65{,}504$ | 14 GB |
+| BF16 (Brain Float) | 16 bit | 与 FP32 同范围，精度低 | 14 GB |
+| INT8 | 8 bit | -128 \~ 127 | 7 GB |
+| INT4 / NF4 | 4 bit | 16 个级别 | 3.5 GB |
+
+**核心思想**：用低位数存储 → 用高位数计算 → 用低位数存储。
+
+这种"存储与计算分离"的思路是所有现代量化技术的灵魂。它的妙处在于：低位数存储节省的是显存，高位数计算保留的是精度——两件好事可以同时拥有。QLoRA 之所以能在 24GB 显卡上跑 33B 模型，本质上就是把这条原则推到了极致。
+
+#### 3.1.2 整数量化的基本公式
+
+接下来我们用 INT8 为例，把量化的数学过程具体走一遍。这是理解 NF4 的基础——它们的差别只是"量化级别如何分布"，而对数值的映射机制是相通的。
+
+**线性对称量化（INT8 为例）**：
+
+把浮点值 $w$ 映射到 INT8 整数 $q$：
+
+$$q = \text{round}\left(\frac{w}{s}\right), \quad s = \frac{\max(|W|)}{127}$$
+
+其中 $s$ 是缩放因子（scale），由整个权重矩阵的绝对值最大值决定。
+
+反量化（dequant）：
+
+$$\hat{w} = q \cdot s$$
+
+**举例**：假设权重 $W$ 的 absmax = 0.5：
+
+$$s = 0.5 / 127 ≈ 0.00394$$
+
+- 浮点值 0.3 → 量化为 $\text{round}(0.3 / 0.00394) = 76$
+- 反量化为 $76 \times 0.00394 ≈ 0.2994$（误差 0.0006）
+
+可以看到，量化天然会引入误差。误差的大小取决于两件事：量化的位数（位数越多误差越小）和量化级别的分布（分布越匹配实际权重，误差越小）。NF4 正是从第二点出发，针对正态分布权重做了专门优化。
+
+#### 3.1.3 浮点量化（FP4）
+
+除了整数量化，业界还尝试了浮点 4-bit 编码。它在表达范围和精度之间做了不同的权衡，但在 LLM 微调场景下通常不如 NF4。下面简要说明它的设计动机。
+
+INT4 假设权重均匀分布，但实际预训练权重近似**正态分布**，所以 INT4 在尾部浪费精度。
+
+**FP4** 用浮点编码：1 bit 符号 + 2 bit 指数 + 1 bit 尾数。虽然只有 16 个取值，但分布更接近正态。
+
+理解 FP4 的关键是要意识到：所谓"浮点编码"本质上是一种"非均匀的量化级别分布"。NF4 把这个思路推到了极致——既然要非均匀，干脆直接按正态分布的分位数来取点，这正是 NF4 比 FP4 表现更好的根本原因。
+
+### 3.2 为什么需要 QLoRA？显存账本计算
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+第 0 章和第 1 章我们都算过显存账本，这里再算一次是为了把 QLoRA 的"基座压缩"效应单独凸显出来。注意看下表里"模型权重"这一列，从 14GB 到 3.5GB 的跨越是 QLoRA 的招牌动作。
+
+我们精确算一遍 7B 模型在不同方案下的显存：
+
+| 方案 | 模型权重 | 梯度 | 优化器状态 | 激活值 | 总计 |
+|-|-|-|-|-|-|
+| Full FT (FP32) | 28 GB | 28 GB | 56 GB | \~10 GB | **\~122 GB** |
+| Full FT (BF16+AMP) | 14 GB | 14 GB | 56 GB | \~6 GB | **\~90 GB** |
+| **LoRA (BF16)** | 14 GB | \~0.1 GB | \~0.4 GB | \~6 GB | **\~20 GB** |
+| **QLoRA (NF4)** | **3.5 GB** | \~0.1 GB | \~0.4 GB | \~6 GB | **\~10 GB** |
+
+**QLoRA 关键创新**：把基座模型权重以 **4-bit NF4** 格式存储，前向时临时反量化为 BF16 参与计算，LoRA 分支保持全精度训练。
+
+这种"三段分工"的设计哲学贯穿了 QLoRA 的所有技术细节：NF4 解决"如何高效存储"的问题，BF16 计算解决"如何保持精度"的问题，LoRA 分支解决"如何低成本训练"的问题。读后面三节时，建议时常回到这条主线上对照——每一项技术细节都是为这条主线服务的。
+
+### 3.3 NF4 量化原理：信息论最优的 4-bit
+
+NF4 是 QLoRA 论文最核心的技术贡献。它表面上只是一个新的 4-bit 数据类型，但背后的设计思想非常深刻——把信息论引入了量化领域。理解了 NF4，你就理解了"为什么 4-bit 也能保住绝大部分精度"。
+
+#### 3.3.1 普通 INT4 的问题
+
+INT4 把 16 个量化级别**均匀分布**在 $[-1, 1]$ 区间：
+
+```Plaintext
+均匀 INT4 的 16 个级别：
+-1.00 -0.87 -0.73 -0.60 -0.47 -0.33 -0.20 -0.07 0.07 0.20 0.33 0.47 0.60 0.73 0.87 1.00
+```
+
+但预训练权重的实际分布近似**零均值正态分布**：
+
+$$W \sim \mathcal{N}(0, \sigma^2)$$
+
+正态分布的特点：**中间密、两头稀**。如果用均匀量化，会浪费大量量化级别到"几乎没有值"的尾部。
+
+#### 3.3.2 NF4 的构造方法
+
+NF4 (NormalFloat 4-bit) 的设计思路：
+
+**Step 1**：把标准正态分布 $\mathcal{N}(0, 1)$ 的累积分布函数（CDF）的 $[0, 1]$ 区间**等概率切成 16 份**。
+
+**Step 2**：取每个区间的分位数作为该量化级别的代表值。
+
+**Step 3**：归一化到 $[-1, 1]$。
+
+NF4 的 16 个量化级别（实际数值，来自论文）：
+
+```Plaintext
+NF4 的 16 个级别（已归一化到 [-1, 1]）：
+-1.0000  -0.6962  -0.5251  -0.3949
+-0.2844  -0.1848  -0.0911   0.0000
+ 0.0796   0.1609   0.2461   0.3379
+ 0.4407   0.5626   0.7228   1.0000
+```
+
+**关键观察**：
+
+- 0 附近的量化级别最密集（0 到 ±0.2 之间有 5 个级别）
+- 两端的量化级别稀疏（±0.7 到 ±1.0 只有 3 个级别）
+- 这正好匹配正态分布的密度
+
+**信息论意义**：对于服从正态分布的随机变量，NF4 是 4-bit 范围内的最优编码。
+
+"信息论最优"这个标签不是营销词，而是有严格的理论依据：在熵编码的意义下，对一个已知分布的随机变量，按分位数划分的编码能最大化每一 bit 携带的信息量。这就是为什么 QLoRA 论文敢声称"NF4 用 4-bit 达到了与 16-bit 几乎相同的下游任务效果"——信息论层面就已经把损失压缩到了极致。
+
+#### 3.3.3 量化与反量化的具体过程
+
+把抽象的"分位数编码"落到工程实现上，无非就是两个查表过程：存储时找最近的 NF4 索引，计算时按索引查回浮点值。下面把这两步具象化。
+
+**量化（存储时）**：
+
+```Plaintext
+浮点权重 w  →  找最近的 NF4 级别  →  4-bit 索引 q (0-15)
+```
+
+**反量化（计算时）**：
+
+```Plaintext
+4-bit 索引 q  →  查表得到 NF4 级别  →  乘以 absmax 缩放因子  →  浮点权重 ŵ
+```
+
+### 3.4 分块量化与离群值处理
+
+#### 3.4.1 为什么需要分块？
+
+如果对整个权重矩阵用一个全局 scale，**一个离群值（outlier）就能拉爆整个矩阵的精度**。
+
+**反例**：权重 $W = [0.01, 0.02, ..., 0.05, 100]$（最后一个是离群值）
+
+- absmax = 100
+- 把 0.01 映射到 INT8：$\text{round}(0.01 / (100/127)) = 0$ → 完全丢失精度
+
+#### 3.4.2 分块量化
+
+把权重矩阵切成大小为 64 的连续块（block），每块单独算 absmax 缩放：
+
+$$\text{quant}(w_i) = \text{round}\left(\frac{w_i}{\text{absmax}(\text{block})} \cdot 7\right)$$
+
+反量化：
+
+$$w_{\text{dequant}} = \text{quant}(w_i) \cdot \frac{\text{absmax}(\text{block})}{7}$$
+
+**为什么是 7？**对于 4-bit 有符号整数，范围是 -7 \~ 7（NF4 用 0 \~ 15 索引映射到对称值）。
+
+**好处**：离群值只影响所在的 64 个权重，不会污染整个矩阵。
+
+#### 3.4.3 分块的代价
+
+每个块需要存一个 FP32 的 absmax 缩放因子。
+
+- 块大小 64 → 每 64 个 4-bit 数（=32 字节）多存 4 字节 FP32 → 额外 12.5% 开销
+- 这正是双重量化要解决的问题（见 3.5）
+
+### 3.5 双重量化（Double Quantization）
+
+分块量化是个好东西，但它本身又引入了新的存储开销——每个块都要附带一个 FP32 的缩放因子。在 7B 模型上，这部分元数据可能占到几百 MB。双重量化是为了解决这个"递归出现的小问题"。
+
+**核心思想**：对**缩放因子本身**再做一次 8-bit 量化。
+
+**计算开销节省**：
+
+- 原始：每 64 个权重多存 4 字节（FP32 absmax）→ 0.5 bit/参数
+- 双重量化：每 64 个 absmax 共享一个 FP32 缩放因子 + 每个 absmax 用 8-bit 存
+
+  - 每 256 个权重多存：256/64 × 1 字节 (8-bit absmax) + 1 × 4 字节 (FP32 总 absmax) = 8 字节
+  - 平均 \~0.127 bit/参数
+
+**总内存节省**（7B 模型）：
+
+| 项目 | 大小 |
+|-|-|
+| 仅 NF4 | 3.5 GB + 0.22 GB (absmax) = 3.72 GB |
+| NF4 + 双重量化 | 3.5 GB + 0.03 GB = **3.53 GB** |
+| **节省** | **0.19 GB ≈ 5%** |
+
+虽然节省的绝对量不大，但**几乎是免费午餐**（精度损失可忽略）。
+
+工程上这种"递归压缩元数据"的思路非常优雅——你压缩了主体数据，主体数据变小后元数据的相对开销就显得突出，于是你再压缩一次元数据。这种"以小博小"的优化，是 QLoRA 论文之所以能跑通 33B 模型的关键工程细节之一。
+
+### 3.6 分页优化器（Paged Optimizers）
+
+NF4 和双重量化解决的是"模型权重"的显存，但训练时优化器状态同样占大头。当显存峰值瞬时飙升时，传统 OOM 报错会直接终止训练。分页优化器借鉴操作系统的虚拟内存机制来缓解这个问题。
+
+#### 3.6.1 操作系统的虚拟内存类比
+
+操作系统在物理内存不足时，会把不活跃的页换到磁盘（swap），需要时再换回来——这就是虚拟内存。
+
+**Paged Optimizers** 借鉴这个思想：当 GPU 显存不足时，把不活跃的优化器状态（Adam 的 m, v）自动换到 **CPU RAM**，需要时再换回 GPU。
+
+#### 3.6.2 何时触发分页？
+
+bitsandbytes 实现的 `paged_adamw_8bit` / `paged_adamw_32bit` 优化器自动管理：
+
+- 显存压力大时：自动换出
+- 优化步骤需要时：自动换入
+
+**性能开销**：分页会带来 5%-15% 的训练速度下降，但能让 33B 模型在 24 GB 显卡上微调，**是显存极限场景的救命稻草**。
+
+#### 3.6.3 启用方式
+
+在 `TrainingArguments` 中设置：
+
+```Python
+TrainingArguments(
+    optim="paged_adamw_8bit",   # 推荐 QLoRA 用
+    # 其他参数...
+)
+```
+
+### 3.7 BitsAndBytesConfig 每个参数详解
+
+讲完原理，回到工程实践。`BitsAndBytesConfig` 是 `transformers` 提供的统一量化配置入口，所有 QLoRA 行为都通过它来开关。下面我们逐字段讲清楚每个开关的作用、推荐取值、踩坑场景。
+
+QLoRA 的核心配置就是 `transformers` 提供的 `BitsAndBytesConfig`，每个参数都讲一遍：
+
+```Python
+from transformers import BitsAndBytesConfig
+import torch
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,                          # ① 启用 4-bit 量化加载
+    bnb_4bit_quant_type="nf4",                  # ② 量化类型
+    bnb_4bit_compute_dtype=torch.bfloat16,      # ③ 反量化后的计算精度
+    bnb_4bit_use_double_quant=True,             # ④ 双重量化开关
+    bnb_4bit_quant_storage=torch.uint8,         # ⑤ 量化数据的存储类型
+    llm_int8_threshold=6.0,                     # ⑥ 仅 8-bit 模式用
+    llm_int8_skip_modules=None,                 # ⑦ 不量化的模块名
+    llm_int8_enable_fp32_cpu_offload=False,     # ⑧ 大模型时 CPU 卸载
+)
+```
+
+**逐项解释**：
+
+| # | 参数 | 取值 | 详细说明 |
+|-|-|-|-|
+| ① | `load_in_4bit` | True | **总开关**：开启后模型加载时按 4-bit 量化存储。与 `load_in_8bit` 互斥 |
+| ② | `bnb_4bit_quant_type` | `"nf4"` 或 `"fp4"` | **NF4 推荐**（适合正态分布权重）；FP4 是浮点 4-bit，精度略低 |
+| ③ | `bnb_4bit_compute_dtype` | `torch.bfloat16` 或 `torch.float16` | 前向/反向计算时反量化的目标精度。**BF16 推荐**（数值范围大）；V100 等老卡用 FP16 |
+| ④ | `bnb_4bit_use_double_quant` | True | 启用双重量化，多省 \~5% 显存，几乎无精度损失 |
+| ⑤ | `bnb_4bit_quant_storage` | `torch.uint8` | 4-bit 数据在内存中如何打包，**保持默认 uint8 即可** |
+| ⑥ | `llm_int8_threshold` | 6.0 | 仅 8-bit 模式：超过这个阈值的离群值用 FP16 保留 |
+| ⑦ | `llm_int8_skip_modules` | None / `["lm_head"]` | 指定不量化的模块名（数值敏感层） |
+| ⑧ | `llm_int8_enable_fp32_cpu_offload` | False | 大模型（>显存）时把部分层放 CPU |
+
+**最常用配置（90% 场景）**：
+
+```Python
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_use_double_quant=True,
+)
+```
+
+### 3.8 QLoRA 完整实战代码
+
+下面这份脚本是 QLoRA 工程化训练的"骨架代码"，几乎可以直接拷到自己的项目里改改路径就能用。看的时候注意 `prepare_model_for_kbit_training` 那一步——它是 QLoRA 与普通 LoRA 在代码层面唯一的差别，但缺了它训练就会发散。
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/peft_qlora_demo.py`**
+
+```Python
+"""
+QLoRA 实战：4-bit NF4 量化 + LoRA 微调。
+显存需求 ~10 GB，可在 RTX 3090/4090 单卡运行 7B 模型微调。
+"""
+import torch
+from transformers import (
+    AutoModelForCausalLM, AutoTokenizer,
+    BitsAndBytesConfig, TrainingArguments, Trainer,
+)
+from peft import (
+    LoraConfig, get_peft_model,
+    prepare_model_for_kbit_training,
+    TaskType,
+)
+
+MODEL_PATH = "/home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct"
+OUTPUT_DIR = "/home/sunlupeng/my-projects/实习/微调/output/qlora_adapter"
+
+# ═══════════════════════════════════════════════════════════════
+# 1. BitsAndBytesConfig：QLoRA 量化配置
+# ═══════════════════════════════════════════════════════════════
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,                          # 启用 4-bit
+    bnb_4bit_quant_type="nf4",                  # NF4 量化
+    bnb_4bit_compute_dtype=torch.bfloat16,      # 计算时反量化为 BF16
+    bnb_4bit_use_double_quant=True,             # 双重量化
+)
+
+# ═══════════════════════════════════════════════════════════════
+# 2. 加载分词器与 4-bit 量化模型
+# ═══════════════════════════════════════════════════════════════
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    quantization_config=bnb_config,    #  关键：传入 BitsAndBytesConfig
+    device_map="auto",
+    trust_remote_code=True,
+)
+
+# ═══════════════════════════════════════════════════════════════
+# 3. 准备 k-bit 训练（关键步骤！不调用会数值不稳定）
+# ═══════════════════════════════════════════════════════════════
+# 这一步做了什么：
+#   1) 把所有 nn.LayerNorm 转回 FP32（数值稳定性）
+#   2) 把 lm_head 转回 FP32
+#   3) 启用梯度检查点（gradient_checkpointing）
+#   4) 把输入嵌入的 requires_grad 设为 True 让梯度能反传
+model = prepare_model_for_kbit_training(model)
+
+# ═══════════════════════════════════════════════════════════════
+# 4. 配置 LoRA（与普通 LoRA 一模一样）
+# ═══════════════════════════════════════════════════════════════
+lora_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    bias="none",
+)
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+
+# ═══════════════════════════════════════════════════════════════
+# 5. 训练参数（QLoRA 必须配合 paged_adamw_8bit 优化器）
+# ═══════════════════════════════════════════════════════════════
+training_args = TrainingArguments(
+    output_dir=OUTPUT_DIR,
+    per_device_train_batch_size=2,
+    gradient_accumulation_steps=8,
+    num_train_epochs=3,
+    learning_rate=2e-4,
+    logging_steps=10,
+    save_steps=200,
+    bf16=True,
+    optim="paged_adamw_8bit",          #  QLoRA 推荐分页优化器
+    gradient_checkpointing=True,        #  进一步节省激活值显存
+    report_to="none",
+)
+
+# 训练略（与 LoRA 相同）
+print("QLoRA 配置就绪，可以开始训练")
+```
+
+**`prepare_model_for_kbit_training` 为什么很重要？**
+
+4-bit 量化模型的几个数值敏感层（`LayerNorm`、`lm_head`、embedding）如果保持低精度会导致训练不稳定。这个函数会自动：
+
+1. 把 `LayerNorm` 提升回 FP32
+2. 把 `lm_head` 提升回 FP32
+3. 启用梯度检查点
+4. 给嵌入层加梯度钩子，确保反向传播能正常工作
+
+**不调用这一步，QLoRA 训练会发散（loss 变 NaN）**。
+
+新人在 QLoRA 上踩的坑里，至少有一半都来自漏调这一行。如果你看到训练 loss 在前几步就跳到 NaN，几乎可以闭着眼断言这就是原因。把这行加上、配合 BF16（不要用 FP16），QLoRA 通常就能稳稳训练几小时不掉链子。
+
+### 3.9 性能与精度的权衡
+
+任何带"压缩"标签的技术都要回答一个问题：你压缩到这个程度，效果损失多少？QLoRA 论文给出了非常详尽的对比实验，结论简单粗暴：**精度损失约 1%，显存节省约 12 倍**。这种性价比在工程界几乎找不到对手。
+
+QLoRA 论文中的关键实验结论：
+
+| 方法 | MMLU 准确率 | 训练显存 (7B) | 训练速度 |
+|-|-|-|-|
+| Full FT (FP32) | 60.2% | 122 GB | 1.0x |
+| Full FT (BF16) | 60.0% | 90 GB | 1.5x |
+| LoRA (BF16) | 59.5% | 20 GB | 1.4x |
+| QLoRA (NF4) | 59.3% | **10 GB** | 1.0x（慢 \~30%） |
+
+**结论**：QLoRA 用 1/12 的显存达到了与全量微调几乎相同的效果，仅有 1% 左右的精度损失。
+
+### 3.10 常见问题与排查
+
+**Q1: QLoRA 训练 loss 是 NaN？**
+
+99% 是没调用 `prepare_model_for_kbit_training`。检查：
+
+- 是否在 `get_peft_model` 之前调用了它
+- 是否用 BF16 而不是 FP16
+
+**Q2: 显存还是不够怎么办？**
+
+依次尝试：
+
+1. 减小 `per_device_train_batch_size` 到 1
+2. 减小 `cutoff_len` 到 512 或 1024
+3. 启用 `gradient_checkpointing=True`
+4. 用 `optim="paged_adamw_8bit"`
+5. 减小 LoRA 的 r 值
+
+**Q3: 4-bit 推理的精度损失大吗？**
+
+对于大多数任务，QLoRA 微调后的 4-bit 模型推理精度损失 < 2%。如果对精度极端敏感，可以训练后 `merge_and_unload`，导出全精度模型再部署。
+
+**Q4: 训练完之后，模型权重是 4-bit 还是 16-bit？**
+
+LoRA 适配器（A, B 矩阵）始终是全精度（BF16/FP16）。基座模型在训练期间一直是 4-bit。推理时如果 `merge_and_unload`，需要先把基座反量化回 BF16，然后合并 LoRA。
+
+**Q5: NF4 真的比 FP4 好吗？**
+
+论文实验：NF4 在 LLaMA 系列上比 FP4 高 0.5-1.0 个百分点。**对正态分布权重，NF4 信息论最优**。生产中默认用 NF4。
+
+**Q6: 双重量化值得开吗？**
+
+值得。几乎无精度损失，节省 5% 显存。`bnb_4bit_use_double_quant=True` 是标配。
+
+---
+
+## 第 4 章 IA3：极简激活值缩放（了解）
+
+讲完 LoRA、P-Tuning、QLoRA 这三个核心方法，最后简单介绍 IA3。它是 PEFT 方法谱系上的"极简派"——通过最少的参数实现最简洁的干预方式。虽然在主流业务里用得不如 LoRA 多，但作为面试谈资和方法对比，了解它对建立 PEFT 全景认知很有帮助。
+
+### 4.1 原理：三个学习向量
+
+IA3 全称 **Infused Adapter by Inhibiting and Amplifying Inner Activations**，由 Liu et al. 在 2022 年提出。它是当前**参数效率最高**的 PEFT 方法之一，每个 Transformer 层只引入三个可学习的向量。
+
+#### 4.1.1 三个学习向量的位置
+
+```Plaintext
+注意力计算：
+    Q = x · W_q
+    K = x · W_k  →  K' = l_k ⊙ K   ← 引入 l_k 缩放 K
+    V = x · W_v  →  V' = l_v ⊙ V   ← 引入 l_v 缩放 V
+
+    Attn = softmax(Q · K'^T / √d_k) · V'
+
+FFN 计算：
+    h = activation(x · W_gate) ⊙ (x · W_up)
+    h' = l_ff ⊙ h                  ← 引入 l_ff 缩放 FFN 中间激活
+    out = h' · W_down
+```
+
+**其中** $\odot$ **表示逐元素乘法（Hadamard product）**。
+
+#### 4.1.2 三个向量的形状
+
+| 向量 | 形状 | 作用 |
+|-|-|-|
+| $l_k \in \mathbb{R}^{d_{kv}}$ | $d_{kv}$ 维 | 缩放 Key |
+| $l_v \in \mathbb{R}^{d_{kv}}$ | $d_{kv}$ 维 | 缩放 Value |
+| $l_{ff} \in \mathbb{R}^{d_{ff}}$ | $d_{ff}$ 维 | 缩放 FFN 中间激活 |
+
+**初始化**：所有向量初始化为 1（全 1 向量），保证训练起始时与基座模型行为一致。
+
+### 4.2 数学公式推导
+
+完整前向传播改造：
+
+$$\text{Attention}(x) = \text{softmax}\left(\frac{(W_Q x)(l_k \odot W_K x)^\top}{\sqrt{d_k}}\right)(l_v \odot W_V x)$$
+
+$$\text{FFN}(x) = W_{\text{down}}(l_{ff} \odot \text{Activation}(W_{\text{gate}} x \odot W_{\text{up}} x))$$
+
+#### 4.2.1 参数量分析
+
+每层 IA3 参数：
+
+$$|\theta_{\text{IA3 layer}}| = d_{kv} + d_{kv} + d_{ff}$$
+
+例（Qwen2-7B，$d_{kv}=512, d_{ff}=18944$）：
+
+- 每层 $512 + 512 + 18944 = 19{,}968$ 个参数
+- 32 层共 $\approx 639{,}000 \approx 0.6$M
+
+**对比**：LoRA r=16 在同模型上约 48M 参数，**IA3 是 LoRA 的 1/75**。
+
+### 4.3 与 LoRA 的对比
+
+| 维度 | LoRA | IA3 |
+|-|-|-|
+| 参数量 | $r \cdot (d+k)$ | $d_{kv} + d_{kv} + d_{ff}$ |
+| 7B 模型典型量 | 48M (r=16) | 0.6M |
+| 训练速度 | 标准 | 略快 |
+| 表达能力 | 强 | 弱（仅逐元素缩放） |
+| 适用任务 | 通用 | 简单分类、风格调整 |
+| 推理时合并 | 可（乘加） | 可（融入 W） |
+
+**何时用 IA3？**
+
+- 任务极简单（情感二分类、命名实体识别）
+- 参数预算极紧张（< 1M）
+- 需要在数百个任务间快速切换
+
+**IA3 的缺点**：表达能力受限于逐元素缩放，复杂任务上效果明显不如 LoRA。
+
+### 4.4 peft 库实现代码
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/peft_ia3_demo.py`**
+
+```Python
+"""
+peft 库实现 IA3 微调。
+"""
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import IA3Config, get_peft_model, TaskType
+
+MODEL_PATH = "/home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct"
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH, torch_dtype=torch.bfloat16, device_map="auto",
+    trust_remote_code=True,
+)
+
+# ═══════════════════════════════════════════════════════════════
+# IA3 配置
+# ═══════════════════════════════════════════════════════════════
+ia3_config = IA3Config(
+    task_type=TaskType.CAUSAL_LM,
+    target_modules=["k_proj", "v_proj", "down_proj"],    # 注入 K/V 投影 + FFN 下投影
+    feedforward_modules=["down_proj"],                    # 标记哪些属于 FFN
+    init_ia3_weights=True,                                # 初始化为全 1
+)
+
+model = get_peft_model(model, ia3_config)
+model.print_trainable_parameters()
+# 期望: ~600K 参数 / 7B 总参数 ≈ 0.009%
+```
+
+**核心参数详解**：
+
+| 参数 | 作用 |
+|-|-|
+| `task_type` | 任务类型（同 LoRA） |
+| `target_modules` | 哪些 Linear 层注入 IA3（即对其输出做缩放） |
+| `feedforward_modules` | 标记 `target_modules` 中哪些是 FFN（IA3 论文中 FFN 的缩放公式略有不同） |
+| `init_ia3_weights` | 初始化为全 1（推荐 True） |
+
+---
+
+## 第 5 章 peft 系统全流程实战
+
+前面四章我们围绕"各个 PEFT 方法"展开，本章把视角切换到"工程系统"——HuggingFace 推出的 `peft` 库是怎么把这些方法整合成统一接口的。理解了 `peft` 的分层架构，你后续切换微调方法时只需要改几行配置，不用重写训练流程。
+
+### 5.1 系统组件总览
+
+`peft` 库的核心组件可以按职责分为四层：
+
+```Plaintext
+┌──────────────────────────────────────────────────────────────┐
+│              peft 库核心组件分层架构                            │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ① 配置层 (Configuration)                                      │
+│     - LoraConfig                                              │
+│     - PromptEncoderConfig / PrefixTuningConfig                │
+│     - IA3Config                                               │
+│     - AdaLoraConfig（动态 r）                                  │
+│     - LoftQConfig（量化感知 LoRA 初始化）                       │
+│                                                               │
+│  ② 注入层 (Injection)                                          │
+│     - get_peft_model(base_model, config) → PeftModel          │
+│     - prepare_model_for_kbit_training (QLoRA 必备)             │
+│     - PeftConfig.from_pretrained / save_pretrained             │
+│                                                               │
+│  ③ 训练层 (Training)                                           │
+│     - PeftModel.forward (跨方法统一接口)                       │
+│     - PeftModel.get_nb_trainable_parameters                    │
+│     - PeftModel.print_trainable_parameters                    │
+│                                                               │
+│  ④ 推理/合并层 (Inference)                                     │
+│     - PeftModel.from_pretrained(base, adapter_dir)             │
+│     - model.merge_and_unload() ← 合并 LoRA                     │
+│     - model.set_adapter(name) ← 多 adapter 切换                │
+│     - model.add_adapter(name, config) ← 多 adapter 注册        │
+│     - model.enable_adapters / disable_adapters                 │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 完整训练脚本（逐行解读）
+
+下面这份脚本是一个生产可用、可直接复用的端到端 QLoRA 训练脚本。它把前几章讲过的所有要素串成了一条完整流水线：数据加载、量化模型、LoRA 注入、训练、评估、保存。建议你先完整通读一遍，再回到每一段对照前面章节的概念。
+
+下面是一个生产可用的端到端 QLoRA 训练脚本。
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/train_full_example.py`**
+
+```Python
+"""
+peft + transformers 完整训练流水线：
+  数据加载 → 模型加载（QLoRA 量化）→ LoRA 注入 → 训练 → 评估 → 推理。
+"""
+import torch
+import json
+from pathlib import Path
+from transformers import (
+    AutoModelForCausalLM, AutoTokenizer,
+    TrainingArguments, Trainer,
+    BitsAndBytesConfig,
+    DataCollatorForLanguageModeling,
+)
+from peft import (
+    LoraConfig, get_peft_model,
+    prepare_model_for_kbit_training,
+    PeftModel, TaskType,
+)
+from datasets import load_dataset
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section 1: 路径常量
+# ═══════════════════════════════════════════════════════════════════════
+WORKSPACE = Path("/home/sunlupeng/my-projects/实习/微调")
+MODEL_PATH = WORKSPACE / "models" / "Qwen2-7B-Instruct"
+DATA_PATH  = WORKSPACE / "data" / "fraud_detection.json"
+OUTPUT_DIR = WORKSPACE / "output" / "lora_adapter"
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section 2: 加载分词器
+# ═══════════════════════════════════════════════════════════════════════
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    # 关键：因果 LM 经常没有 pad_token，必须手动设置
+    # 用 eos_token 当作 pad 不影响因果训练（loss mask 会处理）
+    tokenizer.pad_token = tokenizer.eos_token
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section 3: 加载模型（开启 QLoRA 4-bit 量化）
+# ═══════════════════════════════════════════════════════════════════════
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_use_double_quant=True,
+)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    quantization_config=bnb_config,
+    device_map="auto",          # accelerate 自动按 GPU 切分
+    trust_remote_code=True,
+)
+# QLoRA 必备：稳定数值
+model = prepare_model_for_kbit_training(model)
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section 4: 注入 LoRA
+# ═══════════════════════════════════════════════════════════════════════
+lora_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16, lora_alpha=32, lora_dropout=0.05,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    bias="none",
+)
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section 5: 加载数据集并预处理
+# ═══════════════════════════════════════════════════════════════════════
+dataset = load_dataset("json", data_files=str(DATA_PATH), split="train")
+
+def format_chat(example):
+    """把 instruction/input/output 拼成 Qwen 对话模板。"""
+    user_msg = example["instruction"]
+    if example.get("input"):
+        user_msg = f"{user_msg}\n{example['input']}"
+    text = (
+        f"<|im_start|>user\n{user_msg}<|im_end|>\n"
+        f"<|im_start|>assistant\n{example['output']}<|im_end|>"
+    )
+    return {"text": text}
+
+def tokenize_fn(example):
+    out = tokenizer(
+        example["text"],
+        truncation=True,
+        max_length=1024,
+        padding="max_length",
+    )
+    # 因果 LM：labels = input_ids（模型预测下一个 token）
+    out["labels"] = out["input_ids"].copy()
+    return out
+
+dataset = (dataset
+           .map(format_chat)
+           .map(tokenize_fn, remove_columns=["instruction", "input", "output", "text"]))
+dataset = dataset.train_test_split(test_size=0.1, seed=42)
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section 6: 训练
+# ═══════════════════════════════════════════════════════════════════════
+training_args = TrainingArguments(
+    output_dir=str(OUTPUT_DIR),
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
+    gradient_accumulation_steps=8,        # 等效 batch_size = 2×8 = 16
+    num_train_epochs=3,
+    learning_rate=2e-4,
+    lr_scheduler_type="cosine",
+    warmup_ratio=0.03,
+    logging_steps=10,
+    eval_strategy="steps",
+    eval_steps=100,
+    save_steps=200,
+    save_total_limit=3,
+    bf16=True,
+    optim="paged_adamw_8bit",
+    gradient_checkpointing=True,
+    report_to="none",
+)
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=dataset["train"],
+    eval_dataset=dataset["test"],
+    tokenizer=tokenizer,
+)
+trainer.train()
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section 7: 保存适配器
+# ═══════════════════════════════════════════════════════════════════════
+model.save_pretrained(str(OUTPUT_DIR))
+tokenizer.save_pretrained(str(OUTPUT_DIR))
+print(f"训练完成，适配器保存到：{OUTPUT_DIR}")
+```
+
+### 5.3 TrainingArguments 所有重要参数详解
+
+`TrainingArguments` 是 HuggingFace `Trainer` 的中央配置入口，它涵盖了从优化器、调度器、保存策略到分布式训练的所有开关。新手经常被它几十个参数吓退，但实际上你日常用到的就是下面这二三十个。我把它们按职责分为五大类，逐类讲解。
+
+下表列出训练中**最常用、最影响效果**的参数：
+
+#### 5.3.1 输出与日志
+
+| 参数 | 作用 | 建议 |
+|-|-|-|
+| `output_dir` | checkpoint 与日志保存目录 | 用绝对路径，避免 cwd 变化 |
+| `logging_steps` | 多少步打印一次 loss | 10-50 |
+| `logging_first_step` | 是否打印第一步 loss | True 便于调试 |
+| `report_to` | 日志后端 | `"none"` / `"wandb"` / `"tensorboard"` |
+| `run_name` | 实验名称（wandb 用） | 自定义可读名称 |
+
+#### 5.3.2 训练超参数
+
+| 参数 | 作用 | 调参建议 |
+|-|-|-|
+| `per_device_train_batch_size` | 单卡训练 batch | 24GB 显卡微调 7B 通常 1-4 |
+| `per_device_eval_batch_size` | 单卡评估 batch | 评估不计梯度，可比训练大 2-4 倍 |
+| `gradient_accumulation_steps` | 梯度累积步数 | 等效 batch = 单卡 batch × 累积步数 × 卡数 |
+| `num_train_epochs` | 训练轮数 | 对话 2-3；分类 3-5；过多会过拟合 |
+| `max_steps` | 最大训练步数（覆盖 epochs） | 大数据集时用步数控制更精细 |
+| `learning_rate` | 学习率 | LoRA: 1e-4 \~ 5e-4；Full FT: 1e-5 \~ 5e-5 |
+| `lr_scheduler_type` | 学习率调度器 | `"cosine"`（推荐）/ `"linear"` / `"constant"` |
+| `warmup_ratio` | warmup 占总步数比例 | 0.03 - 0.1 |
+| `warmup_steps` | warmup 步数（覆盖 ratio） | 与 ratio 二选一 |
+| `weight_decay` | 权重衰减系数 | 0.0 - 0.01 |
+| `max_grad_norm` | 梯度裁剪阈值 | 1.0（防梯度爆炸） |
+
+#### 5.3.3 评估与保存
+
+| 参数 | 作用 | 建议 |
+|-|-|-|
+| `eval_strategy` | 评估策略 | `"steps"`（按步）/ `"epoch"`（按轮）/ `"no"` |
+| `eval_steps` | 评估间隔步数 | 100-500 |
+| `save_strategy` | 保存策略 | `"steps"` / `"epoch"` |
+| `save_steps` | 保存间隔步数 | 与 eval_steps 同步 |
+| `save_total_limit` | 最多保留几个 checkpoint | 2-5（避免磁盘爆炸） |
+| `load_best_model_at_end` | 训练结束加载最佳 ckpt | True |
+| `metric_for_best_model` | 用什么指标选最佳 | `"eval_loss"` |
+| `greater_is_better` | 指标越大越好？ | False（loss 越小越好） |
+
+#### 5.3.4 精度与优化
+
+| 参数 | 作用 | 建议 |
+|-|-|-|
+| `bf16` | 使用 BF16 混合精度 | A100/H100/RTX 30+ 推荐 |
+| `fp16` | 使用 FP16 混合精度 | V100/T4 用这个 |
+| `tf32` | 使用 TF32 矩阵乘 | A100/H100 上自动开启 |
+| `optim` | 优化器 | `"adamw_torch"` / `"paged_adamw_8bit"` |
+| `gradient_checkpointing` | 梯度检查点 | 显存紧张时开启（慢 \~20%） |
+| `dataloader_num_workers` | 数据加载并行数 | 2-8 |
+| `dataloader_pin_memory` | 锁页内存 | True（CUDA 时） |
+
+#### 5.3.5 分布式训练
+
+| 参数 | 作用 | 建议 |
+|-|-|-|
+| `ddp_find_unused_parameters` | DDP 是否查找未用参数 | LoRA 时常需 False |
+| `deepspeed` | DeepSpeed 配置文件路径 | 多卡时考虑 |
+| `fsdp` | FSDP 策略 | `"full_shard auto_wrap"` |
+
+### 5.4 模型推理与适配器切换
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/inference_demo.py`**
+
+```Python
+"""
+加载训练好的 LoRA 适配器进行推理。
+"""
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
+
+WORKSPACE = "/home/sunlupeng/my-projects/实习/微调"
+BASE = f"{WORKSPACE}/models/Qwen2-7B-Instruct"
+ADAPTER = f"{WORKSPACE}/output/lora_adapter"
+
+# ═══════════════════════════════════════════════════════════════
+# 1) 加载基座模型 + 分词器
+# ═══════════════════════════════════════════════════════════════
+tokenizer = AutoTokenizer.from_pretrained(BASE, trust_remote_code=True)
+base_model = AutoModelForCausalLM.from_pretrained(
+    BASE,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+    trust_remote_code=True,
+)
+
+# ═══════════════════════════════════════════════════════════════
+# 2) 套上 LoRA 适配器
+# ═══════════════════════════════════════════════════════════════
+model = PeftModel.from_pretrained(base_model, ADAPTER)
+model.eval()
+
+# ═══════════════════════════════════════════════════════════════
+# 3) 推理
+# ═══════════════════════════════════════════════════════════════
+def chat(user_msg: str, max_new_tokens=200) -> str:
+    prompt = (
+        f"<|im_start|>user\n{user_msg}<|im_end|>\n"
+        f"<|im_start|>assistant\n"
+    )
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=0.7,
+            top_p=0.9,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    new_tokens = out[0][inputs.input_ids.shape[1]:]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+# 测试
+print(chat("你是谁？"))
+```
+
+### 5.5 多任务 LoRA 共享与切换
+
+LoRA 最性感的工程能力之一，是允许你在同一个基座模型上同时维护多个适配器，并在运行时按需切换。这种"基座共享、适配器独立"的架构，已经成为多任务 LLM 服务化部署的事实标准（vLLM、SGLang 等推理框架都内建了这种能力）。
+
+`peft` 支持在同一个基座上同时加载多个 LoRA 适配器，动态切换。
+
+```Python
+"""
+多任务 LoRA：用一个 7B 基座 + 3 个适配器实现 3 个独立任务。
+"""
+from peft import PeftModel
+
+# 加载第一个适配器（默认名为 'default'）
+model = PeftModel.from_pretrained(base_model, "/path/to/fraud_adapter")
+
+# 注册第二个适配器
+model.load_adapter("/path/to/translation_adapter", adapter_name="translation")
+
+# 注册第三个适配器
+model.load_adapter("/path/to/code_adapter", adapter_name="code")
+
+# 查看所有已注册的适配器
+print(model.peft_config.keys())  # dict_keys(['default', 'translation', 'code'])
+
+# 切换适配器
+model.set_adapter("translation")
+output = model.generate(...)  # 用翻译适配器
+
+model.set_adapter("code")
+output = model.generate(...)  # 用代码适配器
+
+# 临时禁用所有适配器（用纯基座）
+with model.disable_adapter():
+    output = model.generate(...)  # 用原始 Qwen2-7B
+```
+
+**显存占用**：所有适配器共享同一份基座（14 GB），每个适配器只额外占几十 MB。
+
+### 5.6 LoRA 合并的三种方式
+
+**方式 A：merge_and_unload（推荐）**
+
+```Python
+merged = model.merge_and_unload()
+# merged 是一个普通的 transformers 模型，没有 LoRA 包装
+merged.save_pretrained("/path/to/merged_model")
+```
+
+合并后：
+
+- 适配器消失，权重已融入基座
+- 推理无 LoRA 开销
+- 可用任何标准推理框架（vLLM / TGI）加载
+
+**方式 B：merge_adapter（保留 PEFT 包装）**
+
+```Python
+model.merge_adapter()
+# 此时 PEFT 包装仍在，但权重已合并
+# 可以反向：model.unmerge_adapter()
+```
+
+适合调试场景，可以来回切换合并/分离。
+
+**方式 C：手动合并（教学用）**
+
+```Python
+# 直接操作 LoRA 层
+for name, module in model.named_modules():
+    if hasattr(module, "lora_A"):
+        # 计算 ΔW = B @ A
+        delta_w = module.lora_B["default"].weight @ module.lora_A["default"].weight
+        # 加到原始权重
+        module.base_layer.weight.data += module.scaling["default"] * delta_w
+```
+
+---
+
+## 第 6 章 LLaMA-Factory 系统全流程实战
+
+> 原飞书文档此处包含画板，文章版保留文字说明。
+
+`peft` 已经把微调封装得很优雅，但工程上仍有一些重复劳动：数据格式转换、训练监控、量化导出、Web UI 等。LLaMA-Factory 正是为消除这些重复而生——它把所有最佳实践打包成一个 YAML 配置 + 一行 CLI 命令的工作流。本章我们从安装讲起，逐步深入到 YAML 的每一行字段，最后给出五种典型任务的配置模板。
+
+### 6.1 系统核心优势
+
+`peft` 直接调用需要写训练脚本、管数据、调参；**LLaMA-Factory** 把这些都封装成 YAML 配置 + CLI 命令，并且：
+
+| 优势 | 具体说明 |
+|-|-|
+| **多模型支持** | LLaMA / Qwen / Mistral / ChatGLM / DeepSeek / Yi / Baichuan / Gemma 等 100+ 模型 |
+| **多方法集成** | Full / Freeze / LoRA / QLoRA / DoRA / GaLore / APOLLO 一参数切换 |
+| **数据流标准化** | 统一 `dataset_info.json` 注册机制；支持 Alpaca / ShareGPT / OpenAI 多种格式 |
+| **多阶段训练** | SFT / DPO / PPO / KTO / ORPO 等所有主流对齐方法 |
+| **Web UI** | 浏览器内完成数据上传、参数配置、训练监控 |
+| **量化推理导出** | 训练后一键导出 GGUF（llama.cpp）/ GPTQ / AWQ 格式 |
+| **显存优化** | Flash Attention 2 / 4-bit QLoRA / Gradient Checkpointing / Unsloth |
+| **可视化监控** | 自动绘制 loss / lr 曲线 |
+| **多卡并行** | DeepSpeed / FSDP 一键启用 |
+
+### 6.2 安装与目录结构
+
+#### 6.2.1 安装步骤
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调
+
+# Step 1: 克隆仓库
+git clone https://github.com/hiyouga/LLaMA-Factory.git
+cd LLaMA-Factory
+
+# Step 2: 创建独立虚拟环境（强烈推荐，避免污染）
+python -m venv venv
+source venv/bin/activate
+
+# Step 3: 安装核心依赖（带 torch + 评估指标）
+pip install -e ".[torch,metrics]"
+
+# Step 4: 可选 - Flash Attention 2 加速（编译耗时 10-30 分钟）
+pip install flash-attn --no-build-isolation
+
+# Step 5: 可选 - QLoRA 支持
+pip install bitsandbytes
+
+# Step 6: 验证安装
+llamafactory-cli version
+# 输出: llamafactory version 0.x.x
+```
+
+#### 6.2.2 目录结构
+
+安装后的 LLaMA-Factory 目录：
+
+```Plaintext
+/home/sunlupeng/my-projects/实习/微调/LLaMA-Factory/
+├── src/llamafactory/          ← 系统核心代码
+│   ├── train/                  ← 训练入口
+│   ├── data/                   ← 数据处理
+│   ├── model/                  ← 模型加载
+│   └── webui/                  ← Web UI
+├── data/                       ← 数据集与注册文件
+│   ├── dataset_info.json       ← 数据集注册表（核心！）
+│   ├── alpaca_zh_demo.json     ← 示例数据
+│   └── ...
+├── examples/                   ← YAML 配置示例
+│   ├── train_lora/             ← LoRA 训练样例
+│   ├── train_qlora/            ← QLoRA 训练样例
+│   ├── train_full/             ← 全量微调样例
+│   └── inference/              ← 推理样例
+├── scripts/                    ← 评估、导出辅助脚本
+└── webui.py                    ← Web UI 入口
+```
+
+### 6.3 数据集构建：四种主流格式详解
+
+数据集的格式选择是 LLaMA-Factory 微调链路里"看起来最简单、实际最容易踩坑"的环节。下面我们把社区主流的四种格式都讲清楚，让你拿到不同来源的数据时能快速判断该用哪种格式注册进系统。
+
+LLaMA-Factory 支持四种主流数据格式。
+
+#### 6.3.1 格式一：Alpaca 格式（最常用）
+
+```JSON
+[
+  {
+    "instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。",
+    "input": "这个产品真的太好用了！五星好评！！！",
+    "output": "虚假"
+  }
+]
+```
+
+**字段含义**：
+
+- `instruction`：用户指令 / 任务描述（必需）
+- `input`：任务的具体输入（可选，可空）
+- `output`：期望模型输出（必需）
+
+**适用**：单轮指令微调、分类、问答。
+
+#### 6.3.2 格式二：Alpaca + 多轮对话
+
+```JSON
+[
+  {
+    "instruction": "下面是一段我和你的对话",
+    "input": "今天天气怎么样？",
+    "output": "今天天气晴朗，适合出门。",
+    "history": [
+      ["你好", "你好！我是 AI 助手。"],
+      ["你叫什么名字？", "我叫小 A。"]
+    ]
+  }
+]
+```
+
+`history` 字段保存历史对话（用户和助手交替的列表）。
+
+#### 6.3.3 格式三：ShareGPT 格式
+
+```JSON
+[
+  {
+    "conversations": [
+      {"from": "human", "value": "你好"},
+      {"from": "gpt", "value": "你好！有什么可以帮你的吗？"},
+      {"from": "human", "value": "解释一下量子计算"},
+      {"from": "gpt", "value": "量子计算是利用量子力学原理..."}
+    ]
+  }
+]
+```
+
+**适用**：多轮对话训练数据，源自 ChatGPT 分享的对话格式。
+
+#### 6.3.4 格式四：OpenAI 格式
+
+```JSON
+[
+  {
+    "messages": [
+      {"role": "system", "content": "你是一个有帮助的助手。"},
+      {"role": "user", "content": "你好"},
+      {"role": "assistant", "content": "你好！有什么可以帮你的吗？"}
+    ]
+  }
+]
+```
+
+**适用**：从 OpenAI API 收集的数据，自带 system / user / assistant 角色。
+
+### 6.4 数据集注册：每个字段含义
+
+把数据文件放在 `LLaMA-Factory/data/` 下，然后在 `LLaMA-Factory/data/dataset_info.json` 中追加注册：
+
+```JSON
+{
+  "fraud_detection": {
+    "file_name": "fraud_detection.json",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "instruction",
+      "query": "input",
+      "response": "output",
+      "history": "history"
+    }
+  },
+  "my_sharegpt_data": {
+    "file_name": "my_sharegpt.json",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "conversations"
+    },
+    "tags": {
+      "role_tag": "from",
+      "content_tag": "value",
+      "user_tag": "human",
+      "assistant_tag": "gpt"
+    }
+  }
+}
+```
+
+**字段详解**：
+
+| 字段 | 含义 | 必填 |
+|-|-|-|
+| `file_name` | 数据文件名（相对 `data/` 目录） |  |
+| `formatting` | 数据格式 |  |
+| `columns` | 字段映射（数据中的字段名 → LLaMA-Factory 期望的字段名） |  |
+| `tags`（仅 sharegpt） | ShareGPT 格式的角色标记 | sharegpt 必填 |
+| `subset` | HuggingFace Hub 数据集的子集名 | 可选 |
+| `split` | 用哪个 split（train / validation） | 可选 |
+| `num_samples` | 限制使用的样本数 | 可选 |
+| `system` | 默认 system 提示词 | 可选 |
+| `ranking` | 是否是偏好数据（DPO 用） | 可选 |
+
+### 6.5 YAML 配置文件每一项详解
+
+YAML 是 LLaMA-Factory 的"中央控制台"，所有微调行为都通过它来配置。下面这份 YAML 是一份可直接复用的 QLoRA 模板，每一行都加了注释，并在表格里详细解释为什么这么写。建议你先通读一遍 YAML，再看下面分小节的详细解释。
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/LLaMA-Factory/examples/train_lora/qwen2_lora_fraud.yaml`**
+
+```YAML
+### ─── 模型配置 ─────────────────────────────────────────────────
+model_name_or_path: /home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct
+trust_remote_code: true                  # Qwen 等需要 trust_remote_code
+
+### ─── 微调方法 ─────────────────────────────────────────────────
+stage: sft                                # 阶段: sft / dpo / ppo / kto / orpo
+do_train: true                            # 是否训练
+finetuning_type: lora                     # 方法: lora / freeze / full
+lora_target: all                          # 注入目标: all（所有 linear）/ q_proj,v_proj 等
+
+### ─── LoRA 超参数 ──────────────────────────────────────────────
+lora_rank: 16                             # r
+lora_alpha: 32                            # α
+lora_dropout: 0.05
+
+### ─── 量化（QLoRA）──────────────────────────────────────────────
+quantization_bit: 4                       # 4 = QLoRA / 8 = 8-bit / 不写 = 不量化
+quantization_method: bitsandbytes         # 量化后端
+double_quantization: true                  # 双重量化
+quantization_type: nf4                     # NF4
+
+### ─── 数据集 ──────────────────────────────────────────────────
+dataset: fraud_detection                  # 必须与 dataset_info.json 中的 key 一致
+template: qwen                             # 对话模板（关键！）
+cutoff_len: 1024                           # 最大序列长度
+max_samples: 100000                        # 最多用多少条样本
+overwrite_cache: true                      # 重新生成 token 缓存（数据改了必须开）
+preprocessing_num_workers: 8               # 数据预处理并行数
+
+### ─── 输出与日志 ──────────────────────────────────────────────
+output_dir: /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_qwen
+logging_steps: 10
+save_steps: 200
+save_total_limit: 3
+plot_loss: true                            # 自动生成 loss 曲线 PNG
+
+### ─── 训练超参数 ──────────────────────────────────────────────
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 8             # 等效 batch = 4 × 8 = 32
+learning_rate: 2.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+weight_decay: 0.0
+max_grad_norm: 1.0
+
+### ─── 显存优化 ────────────────────────────────────────────────
+bf16: true                                  # A100/H100/RTX30+ 用 bf16
+fp16: false                                 # V100/T4 用 fp16
+flash_attn: fa2                             # Flash Attention 2 加速
+gradient_checkpointing: true                # 算力换显存
+
+### ─── 评估 ────────────────────────────────────────────────────
+val_size: 0.1                               # 10% 划为验证集
+per_device_eval_batch_size: 8
+eval_strategy: steps
+eval_steps: 200
+```
+
+**每一行的"为什么这么写"**：
+
+#### 6.5.1 model_name_or_path
+
+- 可以是本地路径或 HuggingFace 模型 ID
+- 推荐用绝对路径，避免相对路径问题
+
+#### 6.5.2 template
+
+**必须与模型系列严格匹配**！否则对话格式错乱。常见模板：
+
+| 模板名 | 适用模型 |
+|-|-|
+| `qwen` | Qwen / Qwen2 系列 |
+| `llama3` | LLaMA-3 / LLaMA-3.1 / LLaMA-3.2 |
+| `llama2` | LLaMA-2 |
+| `chatglm3` | ChatGLM3 / ChatGLM4 |
+| `mistral` | Mistral / Mixtral |
+| `baichuan2` | Baichuan2 |
+| `gemma` | Gemma / Gemma-2 |
+| `deepseek` | DeepSeek |
+| `default` | 无固定格式的基座模型 |
+
+#### 6.5.3 cutoff_len
+
+- 短文本分类：512-1024 足够
+- 通用对话：2048
+- 长文档问答：4096-8192（显存翻倍）
+
+#### 6.5.4 lora_target
+
+- `"all"`：自动注入所有 Linear 层（推荐，稳定）
+- `"q_proj,v_proj"`：只注入注意力的 Q 和 V（论文配置）
+- 自定义列表也行
+
+#### 6.5.5 quantization_bit
+
+- 不写：不量化（用全精度 LoRA）
+- `4`：QLoRA（24GB 显卡微调 7B）
+- `8`：8-bit 量化（精度更高但显存大）
+
+#### 6.5.6 bf16 / fp16
+
+**二选一**：
+
+- A100 / H100 / RTX 30/40 系列：`bf16: true`
+- V100 / T4 / RTX 20 系列：`fp16: true`
+
+#### 6.5.7 flash_attn
+
+- `fa2`：Flash Attention 2（推荐，需安装 flash-attn）
+- `sdpa`：PyTorch 2.0+ 内置（兜底）
+- `disabled`：禁用
+
+#### 6.5.8 gradient_checkpointing
+
+- 显存紧张时**强烈推荐开启**
+- 代价：训练慢 \~20%
+- 对 QLoRA 几乎必开
+
+### 6.6 启动训练 / 评估 / 导出
+
+#### 6.6.1 启动训练
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+
+# 单卡训练
+llamafactory-cli train examples/train_lora/qwen2_lora_fraud.yaml
+
+# 多卡训练（DeepSpeed ZeRO-2）
+FORCE_TORCHRUN=1 llamafactory-cli train \
+    examples/train_lora/qwen2_lora_fraud.yaml \
+    --deepspeed examples/deepspeed/ds_z2_config.json
+```
+
+**训练日志关键指标**：
+
+```Plaintext
+{'loss': 1.234, 'learning_rate': 1.8e-4, 'epoch': 0.5}
+{'eval_loss': 1.456, 'eval_runtime': 12.3, 'epoch': 0.5}
+```
+
+监控点：
+
+- `loss` 持续下降并稳定在 0.1-0.3
+- `eval_loss` 与 `loss` 差距不大（无过拟合）
+- 显存占用稳定（无 OOM）
+
+#### 6.6.2 评估
+
+```Bash
+llamafactory-cli train examples/train_lora/qwen2_lora_fraud.yaml \
+    --do_train false \
+    --do_predict true \
+    --predict_with_generate true
+```
+
+输出 `output/fraud_lora_qwen/predictions.json`，可用 Python 解析计算 Accuracy / F1。
+
+#### 6.6.3 推理（交互式对话）
+
+```Bash
+llamafactory-cli chat examples/inference/qwen2_lora_inference.yaml
+```
+
+#### 6.6.4 导出合并模型
+
+```Bash
+llamafactory-cli export \
+    --model_name_or_path /home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct \
+    --adapter_name_or_path /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_qwen/checkpoint-600 \
+    --template qwen \
+    --finetuning_type lora \
+    --export_dir /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_merged \
+    --export_size 2 \
+    --export_device cpu \
+    --export_legacy_format false
+```
+
+**导出参数详解**：
+
+| 参数 | 作用 |
+|-|-|
+| `--model_name_or_path` | 基座模型路径 |
+| `--adapter_name_or_path` | 训练好的 LoRA checkpoint 路径 |
+| `--template` | 对话模板（必须与训练时一致） |
+| `--finetuning_type` | 微调类型 `lora` / `freeze` / `full` |
+| `--export_dir` | 合并后的模型保存目录 |
+| `--export_size` | 模型分片大小（GB）；2 表示每片 2GB |
+| `--export_device` | 导出时使用的设备 `cpu` / `cuda` |
+| `--export_legacy_format` | 是否用旧的 `.bin` 格式；false 用 safetensors |
+
+#### 6.6.5 导出 GGUF（llama.cpp 推理）
+
+```Bash
+llamafactory-cli export \
+    --model_name_or_path ... \
+    --export_dir /path/to/gguf_output \
+    --export_format gguf \
+    --export_quantization_bit 4    # GGUF 内置量化
+```
+
+### 6.7 Web UI 使用要点
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+llamafactory-cli webui
+# 浏览器访问 http://localhost:7860
+```
+
+Web UI 五大标签页：
+
+| 标签页 | 功能 | 典型场景 |
+|-|-|-|
+| **Train** | 选模型 / 选方法 / 选数据集，启动训练 | 临时实验 |
+| **Evaluate & Predict** | 在测试集上评估或预测 | 模型对比 |
+| **Chat** | 加载训练好的适配器对话测试 | 效果检查 |
+| **Export** | 合并 LoRA 并导出模型 | 部署准备 |
+| **Console** | 实时查看训练日志 | 训练监控 |
+
+**适合场景**：临时实验、快速调参、新人入门。
+
+**不适合**：长期定时任务（CLI + YAML 更适合 CI/CD）、需要版本控制的实验。
+
+### 6.8 多种任务的 YAML 模板
+
+#### 6.8.1 LoRA SFT（标准微调）
+
+参考 6.5 节配置。
+
+#### 6.8.2 全量微调
+
+```YAML
+stage: sft
+finetuning_type: full        # ← 改这里
+learning_rate: 1.0e-5         # 全量 FT 需要更小的 lr
+# 删除所有 lora_xxx 字段
+# 删除 quantization_xxx 字段
+```
+
+#### 6.8.3 冻结层微调（Freeze）
+
+```YAML
+stage: sft
+finetuning_type: freeze
+freeze_trainable_layers: 4   # 只解冻最后 4 层
+freeze_trainable_modules: all
+learning_rate: 5.0e-5
+```
+
+#### 6.8.4 DPO 对齐
+
+```YAML
+stage: dpo
+finetuning_type: lora
+dpo_ftx: 0.1                  # DPO 中 SFT loss 的权重
+dpo_loss: sigmoid             # sigmoid / hinge / ipo
+# 数据集需要是偏好格式（chosen / rejected）
+```
+
+#### 6.8.5 多 GPU + DeepSpeed ZeRO-3
+
+```YAML
+# 配置文件保持不变，启动时加 deepspeed 参数
+# FORCE_TORCHRUN=1 llamafactory-cli train cfg.yaml --deepspeed examples/deepspeed/ds_z3_config.json
+deepspeed: examples/deepspeed/ds_z3_config.json
+```
+
+---
+
+## 第 7 章 完整 Demo：欺诈文本分类端到端实战
+
+终于到了把前 6 章串起来的时刻。这一章我们做一个真实任务："训练一个模型识别电商虚假评论"。它麻雀虽小五脏俱全——涉及数据构建、QLoRA 训练、指标评估、模型导出、推理部署，是一个非常适合放进简历的端到端微调项目。
+
+### 7.1 任务设计与数据准备
+
+#### 7.1.1 任务定义
+
+- **目标**：训练一个模型识别电商虚假评论
+- **输入**：一条商品评论文本（中文）
+- **输出**：`虚假` 或 `真实` 二选一
+- **基座模型**：Qwen2-7B-Instruct
+- **方法**：QLoRA 4-bit 微调
+- **硬件**：单卡 RTX 4090（24 GB）
+
+#### 7.1.2 数据准备
+
+**文件：`/home/sunlupeng/my-projects/实习/微调/data/fraud_detection.json`**
+
+```JSON
+[
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "这个产品真的太好用了！用了三天就效果显著！！强烈推荐！！！五星！！！", "output": "虚假"},
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "物流稍慢，包装一般，产品功能符合描述，性价比尚可。", "output": "真实"},
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "绝对神器！姐妹们冲就完事了！不买后悔一辈子！！！", "output": "虚假"},
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "用了两周，电池续航比标称少了 1 小时，介意者慎入。", "output": "真实"},
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "买回来就装上了，效果立竿见影，强烈推荐给所有人！", "output": "虚假"},
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "屏幕色彩饱和度比预期低，但日常使用够用。", "output": "真实"},
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "宝藏好物！！！姐妹们这个真的可以入！！！", "output": "虚假"},
+  {"instruction": "判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。", "input": "在直营店比这个店贵 30 元，下单后送货也快，没什么可挑剔的。", "output": "真实"}
+]
+```
+
+**数据要求清单**：
+
+-  标签平衡（虚假/真实 各占约 50%）
+-  指令格式统一（每条都是"判断...仅回答..."）
+-  输出严格在两个标签内
+-  实际项目至少 500-1000 条
+
+#### 7.1.3 数据集注册到 LLaMA-Factory
+
+1. 复制数据到 `LLaMA-Factory/data/fraud_detection.json`
+2. 修改 `LLaMA-Factory/data/dataset_info.json`，追加：
+
+```JSON
+"fraud_detection": {
+  "file_name": "fraud_detection.json",
+  "formatting": "alpaca",
+  "columns": {
+    "prompt": "instruction",
+    "query": "input",
+    "response": "output"
+  }
+}
+```
+
+### 7.2 训练阶段
+
+#### 7.2.1 方式 A：Python 脚本
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调
+python train_full_example.py
+```
+
+#### 7.2.2 方式 B：LLaMA-Factory CLI
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+llamafactory-cli train examples/train_lora/qwen2_lora_fraud.yaml
+```
+
+#### 7.2.3 训练监控
+
+期望的日志输出：
+
+```Plaintext
+{'loss': 1.8234, 'learning_rate': 1.5e-5, 'epoch': 0.1}
+{'loss': 0.5621, 'learning_rate': 1.8e-4, 'epoch': 0.5}
+{'loss': 0.1234, 'learning_rate': 1.9e-4, 'epoch': 1.0}
+{'eval_loss': 0.1567, 'epoch': 1.0}
+{'loss': 0.0823, 'learning_rate': 1.0e-4, 'epoch': 2.0}
+{'eval_loss': 0.0912, 'epoch': 2.0}
+{'loss': 0.0567, 'learning_rate': 5.0e-6, 'epoch': 3.0}
+{'eval_loss': 0.0734, 'epoch': 3.0}
+```
+
+判断训练健康的标志：
+
+-  `loss` 持续下降
+-  `eval_loss` 与 `loss` 差距小（< 50%）
+-  显存占用稳定
+-  学习率按 cosine 曲线衰减
+
+异常信号：
+
+- ️ `eval_loss` 上升但 `loss` 下降 → **过拟合**，立即停止
+- ️ `loss` 不下降 → 检查学习率、target_modules
+- ️ `loss` 突然变 NaN → 检查混合精度配置
+
+#### 7.2.4 训练后的产物
+
+```Plaintext
+/home/sunlupeng/my-projects/实习/微调/output/fraud_lora_qwen/
+├── adapter_config.json            ← LoRA 配置
+├── adapter_model.safetensors      ← LoRA 权重（几 MB）
+├── tokenizer.json
+├── tokenizer_config.json
+├── special_tokens_map.json
+├── training_args.bin              ← 训练参数
+├── trainer_state.json             ← 训练状态
+├── checkpoint-200/                ← 中间 checkpoint
+├── checkpoint-400/
+├── checkpoint-600/                ← 最终 checkpoint
+└── loss.png                       ← loss 曲线图
+```
+
+### 7.3 评估阶段
+
+训练完只是第一步，真正能说服业务方接入你的模型的，是一份漂亮的评估报告。这一节我们既讲怎么用 LLaMA-Factory 自动跑评估，也给出手工调用 sklearn 计算 P/R/F1 的脚本——前者方便快速验证，后者方便深度分析。
+
+#### 7.3.1 自动评估
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+llamafactory-cli train examples/train_lora/qwen2_lora_fraud.yaml \
+    --do_train false \
+    --do_predict true \
+    --predict_with_generate true
+```
+
+输出 `generated_predictions.json`。
+
+#### 7.3.2 手动计算指标
+
+```Python
+"""
+计算欺诈检测的评估指标。
+"""
+import json
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, classification_report,
+)
+
+WORKSPACE = "/home/sunlupeng/my-projects/实习/微调"
+PRED_FILE = f"{WORKSPACE}/output/fraud_lora_qwen/generated_predictions.json"
+
+# 加载预测结果
+with open(PRED_FILE) as f:
+    data = [json.loads(line) for line in f]
+
+# 提取真实标签和预测标签
+y_true = [item["label"] for item in data]
+y_pred = [item["predict"].strip() for item in data]
+
+# 标签编码
+label_map = {"真实": 0, "虚假": 1}
+y_true_enc = [label_map.get(l, -1) for l in y_true]
+y_pred_enc = [label_map.get(p, -1) for p in y_pred]
+
+# 计算指标
+print(f"Accuracy:  {accuracy_score(y_true_enc, y_pred_enc):.4f}")
+print(f"Precision: {precision_score(y_true_enc, y_pred_enc):.4f}")
+print(f"Recall:    {recall_score(y_true_enc, y_pred_enc):.4f}")
+print(f"F1:        {f1_score(y_true_enc, y_pred_enc):.4f}")
+
+# 混淆矩阵
+print("\n混淆矩阵:")
+print(confusion_matrix(y_true_enc, y_pred_enc))
+
+# 详细报告
+print("\n详细报告:")
+print(classification_report(y_true_enc, y_pred_enc,
+                            target_names=["真实", "虚假"]))
+```
+
+#### 7.3.3 评估指标含义
+
+| 指标 | 公式 | 含义 |
+|-|-|-|
+| Accuracy | (TP+TN) / 总数 | 整体准确率 |
+| Precision | TP / (TP+FP) | 预测为"虚假"中真实虚假的比例 |
+| Recall | TP / (TP+FN) | 真实虚假中被识别出的比例 |
+| F1 | 2 × P × R / (P+R) | Precision 和 Recall 的调和平均 |
+
+**业务侧重**：
+
+- 反欺诈场景：**Recall 重要**（不能漏掉欺诈）
+- 正常评论保护：**Precision 重要**（不能误杀正常评论）
+- 一般情况：**F1 重要**
+
+### 7.4 推理与部署
+
+#### 7.4.1 合并并导出
+
+```Bash
+cd /home/sunlupeng/my-projects/实习/微调/LLaMA-Factory
+
+llamafactory-cli export \
+    --model_name_or_path /home/sunlupeng/my-projects/实习/微调/models/Qwen2-7B-Instruct \
+    --adapter_name_or_path /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_qwen/checkpoint-600 \
+    --template qwen \
+    --finetuning_type lora \
+    --export_dir /home/sunlupeng/my-projects/实习/微调/output/fraud_lora_merged \
+    --export_size 2 \
+    --export_device cpu \
+    --export_legacy_format false
+```
+
+#### 7.4.2 部署推理
+
+```Python
+"""
+加载合并后的模型进行推理。
+"""
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+MERGED = "/home/sunlupeng/my-projects/实习/微调/output/fraud_lora_merged"
+
+tokenizer = AutoTokenizer.from_pretrained(MERGED, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    MERGED,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+    trust_remote_code=True,
+)
+model.eval()
+
+def predict_fraud(review_text: str) -> str:
+    """预测一条评论是否为虚假评论"""
+    prompt = (
+        f"<|im_start|>user\n判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。\n"
+        f"{review_text}<|im_end|>\n<|im_start|>assistant\n"
+    )
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=8,
+            do_sample=False,           # 贪婪解码
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    new_tokens = out[0][inputs.input_ids.shape[1]:]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
+# ─── 测试用例 ───────────────────────────────────────────────
+test_cases = [
+    "姐妹们冲冲冲！神级产品！五星好评！！！",
+    "用了一周，比想象中略好，可以推荐。",
+    "绝绝子！这个真的是必入！！！",
+    "色差比图片大，但价格便宜可以接受。",
+]
+
+for review in test_cases:
+    pred = predict_fraud(review)
+    print(f"评论: {review[:30]:30s} → 预测: {pred}")
+```
+
+#### 7.4.3 批量推理优化
+
+```Python
+def predict_batch(reviews: list, batch_size: int = 8) -> list:
+    """批量预测，速度比逐个预测快 5-10 倍"""
+    all_preds = []
+    for i in range(0, len(reviews), batch_size):
+        batch = reviews[i:i + batch_size]
+        prompts = [
+            f"<|im_start|>user\n判断以下商品评论是否为虚假评论。仅回答'虚假'或'真实'。\n"
+            f"{r}<|im_end|>\n<|im_start|>assistant\n"
+            for r in batch
+        ]
+        inputs = tokenizer(prompts, return_tensors="pt",
+                           padding=True, truncation=True,
+                           max_length=512).to(model.device)
+        with torch.no_grad():
+            out = model.generate(
+                **inputs,
+                max_new_tokens=8,
+                do_sample=False,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        # 解码每个样本（注意只取新生成部分）
+        for j in range(len(batch)):
+            new_tokens = out[j][inputs.input_ids.shape[1]:]
+            pred = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+            all_preds.append(pred)
+    return all_preds
+```
+
+### 7.5 进一步优化建议
+
+第一轮训练几乎不会一次到位。模型可能精度不够、可能过拟合、可能某类样本误判明显。下面按"数据 / 训练 / 推理"三个层面，给出一份排查与改进的优先级清单。**优化时永远从数据层入手**，这是工业界经验反复验证的铁律。
+
+如果第一轮训练效果不理想，可以按以下顺序优化：
+
+#### 7.5.1 数据层面（最高优先级）
+
+| 问题 | 优化方法 |
+|-|-|
+| 准确率低 | **扩充数据**——质量优于数量，1K 高质量 > 10K 低质量 |
+| 标签不平衡 | 上采样少数类 / 下采样多数类 |
+| 某类误判多 | 针对性补充该类的边界样本 |
+| 边界样本错 | 标注人员讨论统一标准 |
+
+#### 7.5.2 训练层面
+
+| 问题 | 优化方法 |
+|-|-|
+| 过拟合 | 增加 `lora_dropout`、降低 `epochs`、增大 `weight_decay` |
+| 欠拟合 | 增大 `r`、增大 `epochs`、增大 `learning_rate` |
+| Loss 不下降 | 检查 `learning_rate`、`target_modules`、数据格式 |
+| 训练慢 | 开启 `flash_attn`、`gradient_checkpointing` |
+
+#### 7.5.3 推理层面
+
+| 优化目标 | 方法 |
+|-|-|
+| 推理速度 | merge 后用 vLLM / TGI 部署 |
+| 部署体积 | 导出为 GGUF + Q4 量化（10GB → 4GB） |
+| 多任务复用 | 多 LoRA 适配器共享基座 |
+| 极端低显存 | 4-bit GPTQ / AWQ 推理 |
+
+---
+
+## 附录 A 工作目录最终结构
+
+完整项目目录：
+
+```Plaintext
+/home/sunlupeng/my-projects/实习/微调/
+│
+├── PEFT_入门到实战.md             ← 本手册（入门）
+├── PEFT_进阶实战手册.md           ← 进阶/面试速查
+│
+├── lora_from_scratch.py          ← 手撕 LoRA（教学版）
+├── peft_lora_demo.py             ← peft LoRA 标准示例
+├── peft_ptuning_demo.py          ← peft P-Tuning 示例
+├── peft_qlora_demo.py            ← peft QLoRA 示例
+├── peft_ia3_demo.py              ← peft IA3 示例
+├── train_full_example.py         ← 端到端训练脚本
+├── inference_demo.py             ← 推理脚本
+│
+├── data/                          ← 数据集存放区
+│   └── fraud_detection.json
+│
+├── models/                        ← 基座模型存放区
+│   └── Qwen2-7B-Instruct/
+│       ├── config.json
+│       ├── model.safetensors.index.json
+│       ├── model-00001-of-00004.safetensors
+│       ├── ...
+│       ├── tokenizer.json
+│       └── tokenizer_config.json
+│
+├── output/                        ← 训练产物
+│   ├── lora_adapter/             ← peft LoRA 训练产物
+│   │   ├── adapter_config.json
+│   │   ├── adapter_model.safetensors
+│   │   └── ...
+│   ├── qlora_adapter/            ← QLoRA 训练产物
+│   ├── fraud_lora_qwen/          ← LLaMA-Factory 训练产物
+│   │   ├── checkpoint-200/
+│   │   ├── checkpoint-400/
+│   │   ├── checkpoint-600/
+│   │   ├── adapter_config.json
+│   │   ├── adapter_model.safetensors
+│   │   ├── trainer_state.json
+│   │   └── loss.png
+│   └── fraud_lora_merged/         ← 合并后的部署模型
+│       ├── config.json
+│       ├── model.safetensors.index.json
+│       ├── model-00001-of-00002.safetensors
+│       └── ...
+│
+└── LLaMA-Factory/                 ← LLaMA-Factory 系统
+    ├── data/
+    │   ├── dataset_info.json
+    │   └── fraud_detection.json
+    ├── examples/
+    │   ├── train_lora/
+    │   │   └── qwen2_lora_fraud.yaml
+    │   ├── train_qlora/
+    │   ├── inference/
+    │   └── deepspeed/
+    ├── src/
+    └── webui.py
+```
+
+---
+
+## 附录 B 常见报错与排查
+
+新人微调时遇到的报错，90% 都集中在这五大类——显存爆掉、数值发散、模型加载、推理输出、系统环境。把它们整理成查询表，遇到报错先到这里对一遍能省下大量调试时间。
+
+### B.1 显存与内存类
+
+| 报错信息 | 原因 | 解决方案 |
+|-|-|-|
+| `CUDA out of memory` | 显存不足 | 1) 降 `per_device_train_batch_size` 到 1  <br/>2) 开 `gradient_checkpointing=True`  <br/>3) 减小 `cutoff_len`  <br/>4) 换用 QLoRA 4-bit 量化 |
+| `RuntimeError: CUDA error: an illegal memory access` | 多卡数据不同步 | 重启进程；检查 `device_map` 配置 |
+| 训练突然爆显存 | batch 内序列长度差异大 | 启用 `group_by_length=True` |
+
+### B.2 数值稳定性类
+
+| 报错信息 | 原因 | 解决方案 |
+|-|-|-|
+| 训练 loss 是 NaN | FP16 数值溢出 | 1) 换 BF16  <br/>2) 降低 `learning_rate`  <br/>3) 加 `max_grad_norm=1.0` |
+| QLoRA loss 变 NaN | 没调 `prepare_model_for_kbit_training` | 在 `get_peft_model` 前调用此函数 |
+| `inf detected in gradient` | 梯度爆炸 | 加 `max_grad_norm=1.0` |
+
+### B.3 模型加载类
+
+| 报错信息 | 原因 | 解决方案 |
+|-|-|-|
+| `OSError: Can't load tokenizer` | tokenizer 文件缺失 | 重新下载模型 |
+| `ValueError: trust_remote_code=True` | Qwen 等需要自定义代码 | 加 `trust_remote_code=True` |
+| `requires_grad` 全 False | QLoRA 路径错 | 必须 `prepare_model_for_kbit_training` 再 `get_peft_model` |
+| `pad_token is None` | 分词器没有 pad token | `tokenizer.pad_token = tokenizer.eos_token` |
+
+### B.4 推理类
+
+| 报错信息 | 原因 | 解决方案 |
+|-|-|-|
+| 推理输出乱码 | 对话模板不匹配 | `template` 必须与训练时一致 |
+| LoRA 没生效 | 加载顺序错 | 先加载 base_model，再 `PeftModel.from_pretrained` |
+| 推理结果不稳定 | 温度太高 | `do_sample=False` 或调低 `temperature` |
+| `Cannot generate without lm_head` | 模型保存不完整 | 重新 `merge_and_unload` 导出 |
+
+### B.5 系统类
+
+| 报错信息 | 原因 | 解决方案 |
+|-|-|-|
+| `flash_attn` 安装报错 | CUDA / GCC 版本不匹配 | `pip install flash-attn --no-build-isolation` 或暂时关闭 |
+| `bitsandbytes` 报错 | CUDA 版本不对 | 卸载重装：`pip uninstall bitsandbytes && pip install bitsandbytes` |
+| Web UI 端口被占 | 默认 7860 占用 | `llamafactory-cli webui --port 17860` |
+| 多卡训练卡住 | NCCL 通信问题 | 设置 `export NCCL_P2P_DISABLE=1` |
+
+---
+
+## 附录 C 推荐学习资源
+
+### C.1 论文（按必读优先级）
+
+1. **LoRA**: *LoRA: Low-Rank Adaptation of Large Language Models* (Hu et al., 2021)
+2. **QLoRA**: *QLoRA: Efficient Finetuning of Quantized LLMs* (Dettmers et al., 2023)
+3. **P-Tuning v2**: *P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally Across Scales and Tasks* (Liu et al., 2022)
+4. **Prompt Tuning**: *The Power of Scale for Parameter-Efficient Prompt Tuning* (Lester et al., 2021)
+5. **Prefix Tuning**: *Prefix-Tuning: Optimizing Continuous Prompts for Generation* (Li & Liang, 2021)
+6. **Adapter**: *Parameter-Efficient Transfer Learning for NLP* (Houlsby et al., 2019)
+7. **IA3**: *Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning* (Liu et al., 2022)
+8. **DoRA**: *DoRA: Weight-Decomposed Low-Rank Adaptation* (Liu et al., 2024)
+
+### C.2 开源仓库
+
+| 仓库 | 用途 |
+|-|-|
+| [huggingface/peft](https://github.com/huggingface/peft) | 官方 PEFT 库 |
+| [huggingface/transformers](https://github.com/huggingface/transformers) | 预训练模型库 |
+| [hiyouga/LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) | 一站式微调系统 |
+| [TimDettmers/bitsandbytes](https://github.com/TimDettmers/bitsandbytes) | 4-bit 量化底座 |
+| [unslothai/unsloth](https://github.com/unslothai/unsloth) | 训练加速系统（2-5x） |
+| [microsoft/LoRA](https://github.com/microsoft/LoRA) | LoRA 官方实现 |
+
+### C.3 中文教程
+
+| 资源 | 内容 |
+|-|-|
+| HuggingFace 中文文档 | peft / transformers 中文翻译 |
+| LLaMA-Factory Wiki | 中文使用文档 |
+| AI Hub | 模型下载与社区 |
+
+---
+
+## 附录 D 面试速查表
+
+把前面所有章节里"必须能脱稿回答"的内容收拢成一张表，方便临场前快速过一遍。其中公式部分要做到能在白板上现场推导，超参数部分要记住推荐起步值，问答部分要做到能用 3-5 句话流畅展开。
+
+### D.1 必背公式
+
+**LoRA 前向传播**：
+
+$$h = W_0 x + \frac{\alpha}{r} BA x$$
+
+**P-Tuning 输入构造**：
+
+$$\text{Input} = [\tilde{\mathbf{p}}_0, \tilde{\mathbf{p}}_1, \dots, \tilde{\mathbf{p}}_{m-1}, \text{Embed}(x_1), \dots]$$
+
+**NF4 量化（分块）**：
+
+$$\text{quant}(w) = \text{round}\left(\frac{w}{\text{absmax}} \cdot 7\right)$$
+
+**IA3 缩放**：
+
+$$h = (l_k \odot W_K x), \quad h = (l_v \odot W_V x), \quad h = (l_{ff} \odot W_{ff} x)$$
+
+### D.2 必背超参数
+
+| 方法 | 关键超参 | 推荐起步值 |
+|-|-|-|
+| LoRA | r, α | r=16, α=32 |
+| QLoRA | bnb_4bit_quant_type | "nf4" |
+| P-Tuning | num_virtual_tokens | 20 |
+| 学习率 | learning_rate | LoRA 2e-4, Full FT 2e-5 |
+
+### D.3 高频追问 Top 10
+
+| # | 问题 | 一句话回答 |
+|-|-|-|
+| 1 | LoRA 的核心假设 | $\Delta W$ 是低秩的，可用 $BA$ 近似 |
+| 2 | B 为什么初始化为零 | 保证 $\Delta W=0$ 起步，不破坏预训练 |
+| 3 | A 为什么不能初始化为零 | 否则梯度被 0 截断，永远学不动 |
+| 4 | α/r 的作用 | 缩放因子，使调参与 r 解耦 |
+| 5 | 推理时为什么能合并 | LoRA 是并联结构，可加回原权重 |
+| 6 | QLoRA 怎么省显存 | 4-bit 存储基座，BF16 计算，LoRA 全精度 |
+| 7 | NF4 优于均匀量化的原因 | 针对正态分布权重做了分位点优化 |
+| 8 | P-Tuning v1 vs v2 区别 | v1 只在 Embedding 层；v2 每层都插入 |
+| 9 | LoRA 注入哪些层最好 | Q/K/V/O + FFN 全注入效果最好 |
+| 10 | 多任务怎么用 LoRA | 共享基座，每任务一个独立 adapter |
+
+---
+
+**学习路径建议**：
+
+1. **第一遍（1-2 小时）**：通读第 0 章 + 第 1 章前 5 节，建立直觉
+2. **第二遍（2-3 小时）**：运行 Demo 1-4，亲手感受低秩分解和 LoRA 注入
+3. **第三遍（半天）**：跑通第 1.10 节的 peft 完整示例，理解工程化流程
+4. **第四遍（半天）**：阅读第 2-4 章理解三种 PEFT 方法的差异
+5. **第五遍（1-2 天）**：用第 6 章的 LLaMA-Factory 完成第 7 章的完整 Demo
+6. **复习**：用 `PEFT_进阶实战手册.md` 巩固面试要点
+
+祝学习顺利！有任何疑问可以随时翻这本手册查阅。

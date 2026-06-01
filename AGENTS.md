@@ -33,6 +33,10 @@ Prefer the `@/` path alias for local imports. Keep UI primitives in `components/
 
 There is no dedicated test runner configured yet. Treat linting, type checking, and `next build` as the current quality gate. If adding tests later, place them near the feature or in a clear test directory, name files `*.test.ts` or `*.test.tsx`, and document the new command in `package.json`.
 
+## Assistant Preferences
+
+Do not proactively inspect images or screenshots with visual tools. For image-related work, rely on file metadata, code, paths, text descriptions, or ask the user to confirm the visual result.
+
 ## Commit & Pull Request Guidelines
 
 Recent history uses concise Conventional Commit-style messages such as `docs: ...`, `docs(thesis): ...`, and `chore: ...`. Follow that pattern: `type(scope): summary`, with the scope optional.

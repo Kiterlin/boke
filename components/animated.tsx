@@ -16,9 +16,9 @@ export function FadeIn({
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 18 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay }}
+      transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1], delay }}
       className={cn(className)}
     >
       {children}
@@ -35,8 +35,8 @@ export function HoverLift({
 }) {
   return (
     <motion.div
-      whileHover={{ y: -4 }}
-      transition={{ type: "spring", stiffness: 260, damping: 22 }}
+      whileHover={{ y: -2 }}
+      transition={{ type: "spring", stiffness: 280, damping: 28 }}
       className={className}
     >
       {children}

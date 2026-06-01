@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { FadeIn } from "@/components/animated";
 import { SearchClient } from "@/components/search-client";
+import { Badge } from "@/components/ui/badge";
 import { pageMetadata } from "@/lib/metadata";
 import { getAllPosts } from "@/lib/posts";
 
@@ -15,12 +16,14 @@ export default function SearchPage() {
   const posts = getAllPosts();
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-14 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
       <FadeIn>
-        <p className="text-sm font-medium text-accent">Search</p>
-        <h1 className="mt-3 text-5xl font-semibold tracking-normal">搜索知识库</h1>
-        <p className="mt-5 text-lg leading-8 text-muted-foreground">
-          客户端即时搜索本地文章元数据与摘要，适合中小型个人/团队博客第一版。
+        <Badge variant="accent">Search</Badge>
+        <h1 className="mt-4 text-balance text-4xl font-semibold tracking-normal sm:text-5xl">
+          搜索文章
+        </h1>
+        <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
+          输入标题、标签、分类或摘要关键词，快速定位已发布内容。
         </p>
       </FadeIn>
       <div className="mt-10">

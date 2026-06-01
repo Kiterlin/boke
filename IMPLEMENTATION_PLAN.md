@@ -21,3 +21,21 @@
 **Success Criteria**: Commands pass and final report covers stack, commands, structure, implementation, test results, and deployment.
 **Tests**: `npm run build`; Playwright smoke tests.
 **Status**: In Progress
+
+## Stage 5: Research & Project Source Review
+**Goal**: Extract paper and project facts from local IF/ICRA materials, resume LaTeX, and Feishu Wiki docs.
+**Success Criteria**: Key paper titles, contributions, metrics, and project architecture points are available for page copy.
+**Tests**: Manual source cross-check against PDFs, TeX, resume, and fetched Wiki docs.
+**Status**: Complete
+
+## Stage 6: Papers & Projects Pages
+**Goal**: Add polished `/papers` and `/projects` pages and expose them in the site navigation.
+**Success Criteria**: Pages render responsive research/project showcases with concrete metrics, visual assets, and clear links between sections.
+**Tests**: `npm run lint`, `npm run typecheck`, `npm run build`.
+**Status**: Complete
+
+## Stage 7: Visual Verification
+**Goal**: Run the site locally and validate the new pages in browser automation.
+**Success Criteria**: Desktop and mobile views load without layout breakage; major content and images are visible.
+**Tests**: Browser automation DOM checks, image natural-size checks, and mobile overflow checks for `/papers` and `/projects`.
+**Status**: Complete

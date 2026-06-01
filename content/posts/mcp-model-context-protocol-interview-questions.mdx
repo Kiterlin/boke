@@ -1,0 +1,398 @@
+---
+title: "MCP 模型上下文协议高频面试题"
+description: "整理 MCP 高频面试题与典型回答，覆盖 MCP、Function Calling、CLI、Skill、安全机制和 Agent 工具编排。"
+date: "2026-05-29"
+category: "面试题"
+tags: ["MCP", "Agent", "面试题", "工具协议"]
+author: "Feishu Knowledge Base"
+featured: true
+---
+# MCP 模型上下文协议高频面试题
+
+> 本文整理了 MCP（Model Context Protocol）相关的高频面试题及典型答案，涵盖 MCP 基础概念、与 Function Calling / Skill / CLI 的对比、安全机制以及在 Agent 系统中的应用。
+
+##  15 道高频面试题 · 速记答案
+
+### Q1. Skill 和 CLI 了解吗，MCP 和 Skill、CLI 对比有哪些优劣势？token 哪个用的多？
+
+> **三者定位：**MCP 是**协议**（标准化的能力接入通道），CLI 是**本地可执行工具**（LLM 通过 shell 直接调用），Skill 是**Markdown 风格的领域知识/工作流包**（按需加载）。
+
+| 维度 | MCP | CLI | Skill |
+|-|-|-|-|
+| 形态 | Server 进程 + JSON-RPC 2.0 | 本地命令行程序 | 文件夹 + SKILL.md |
+| 触发 | 会话初始全量注入 schema | shell 调用，模型已熟悉语法 | 按 description 语义匹配后加载 |
+| Token 消耗 | **最高**（实测 44K vs CLI 1.4K） | 低 | **极低**（静止状态 30–50 tokens） |
+| 跨平台 | 开放标准（多家支持） | 本地依赖，需预装 | 目前 Anthropic 生态专属 |
+| 认证/多租户 | 原生 OAuth 2.0 | 本地凭证，单租户 | 无 |
+
+**Token 谁多：**MCP >> CLI > Skill。MCP 把所有 Server 工具的完整 schema 都在对话开始就注入上下文，量级是 CLI 的 10–30 倍以上；详见本文第一、二章的实测数据。
+
+---
+
+### Q2. 你说 token MCP 消耗更多是吧，那 Skill 和 CLI 分别什么时候用呢？
+
+
+> **CLI 适用：执行能力**
+> Agent 真的要去"做事"——gh、kubectl、aws、git、ffmpeg 这些工具本身就是 Agent 最自然的接口（Unix 哲学一切皆文本流）。LLM 在预训练阶段就见过大量这些命令，几乎不需要额外说明就会用。
+
+
+> **Skill 适用：领域知识/工作流**
+> 需要告诉 Agent"怎么做某件事"——代码审查规范、数据分析的标准流程、客服回复话术模板、团队内部约定。Skill 内容只在判断相关时才展开。
+
+
+**组合用法：**真实 Agent 系统里 Skill 负责"方法论"，CLI 负责"执行"，二者互补。比如代码审查 Skill 告诉 Agent 检查哪些项、按什么顺序，Agent 调 `gh pr diff` 拿到 diff、调 `gh pr comment` 提交评论。MCP 主要留给跨租户 OAuth、SaaS 集成等 CLI 搞不定的场景。
+
+---
+
+### Q3. MCP 的三大核心组件 Host、Client、Server 有写过吗，都什么作用？
+
+> **规范原文（spec 2025-11-25）：**"MCP 采用 **client-host-server** 架构。Host 可以管理多个 Client 实例，每个 Client 维持与一个 Server 的 1:1 连接。MCP 基于 JSON-RPC，是有状态会话协议（stateful session protocol）。"
+
+| 角色 | 是什么 | 职责 |
+|-|-|-|
+| **Host** | LLM 应用本体（Claude Desktop、Cursor、Windsurf、IDE 插件…） | 整体编排、生命周期、用户授权、把 LLM 决策翻译成工具调用；管理多个 Client 实例 |
+| **Client** | Host 内部的连接器，每实例对应一个 Server 连接 | 协议会话、能力协商（initialize）、消息路由、订阅通知 |
+| **Server** | 能力提供方（独立进程或远程服务） | 对外暴露 **Tools**、**Resources**、**Prompts** 三种原语；执行具体业务逻辑 |
+
+**关键关系：**1 Host : N Client : N Server，且每条 Client↔Server 连接是**独立的有状态会话**（不是无状态 HTTP 调用）。这种设计天然提供进程隔离和能力沙箱。
+
+---
+
+### Q4. MCP 和 Function Calling 的核心差异了解吗？
+
+> **一句话：**Function Calling 是**模型层**的能力（LLM 怎么表达"我想调工具"）；MCP 是**协议层**的标准（应用怎么发现/调到工具）。**不是替代而是分层，二者通常一起用。**
+
+| 维度 | Function Calling | MCP |
+|-|-|-|
+| 层级 | 模型 API 能力（OpenAI Tool Use、Anthropic Tool Use 等） | 应用 ↔ 外部能力的传输协议 |
+| 解决的问题 | LLM 用结构化格式输出"调用意图" | 跨厂商、跨应用统一发现和调用工具 |
+| 复用粒度 | 每个应用自己定义函数和实现 | 一个 MCP Server 写一次，所有 Host 都能用 |
+| 与模型耦合 | 每家模型 API 格式不同 | 模型无关（Host 把 MCP tool 翻译成模型原生格式） |
+
+**实际配合：**Host 通过 MCP 的 `tools/list` 拿到 Server 的能力清单 → 翻译成 LLM 的原生 function calling schema → LLM 用 function calling 发出 tool-call → Host 通过 MCP 的 `tools/call` 路由到对应 Server 执行。MCP 上跑的工具调用，最后那一步触发仍然依赖模型的 Function Calling 能力。
+
+---
+
+### Q5. M×N 集成问题有了解过吗，MCP 怎么解决的？
+
+> **M×N 问题：**M 个 AI 应用 × N 个数据源/工具 = M×N 套定制集成。每加一个应用或一个数据源，集成成本都是乘法增长。
+
+> **MCP 的解法：把 M×N 变成 M+N。**
+> - M 个 AI 应用各自实现一次 **MCP Client**
+> - N 个数据源/工具各自实现一次 **MCP Server**
+> - 任何 Client 都能即插即用地连接任何 Server
+
+这跟 USB-C 的物理类比同构：USB-C 之前每种设备 × 每种线缆都要定制，USB-C 之后大家都按一个标准实现各自一端的接口，任意两端可互连。MCP 把"协议层标准化"带来的**网络效应**引入了 AI 工具集成生态。
+
+---
+
+### Q6. MCP 和 HTTP API 的区别是什么？
+
+| 维度 | HTTP API | MCP |
+|-|-|-|
+| 会话模型 | 无状态请求-响应 | **有状态会话**（initialize 握手、能力协商、生命周期管理） |
+| 消息方向 | 单向（client → server） | **双向**（server 可发请求给 client：sampling、elicitation、roots/list） |
+| 能力发现 | 需 OpenAPI/Swagger 外挂 schema | 原生 `tools/list`、`resources/list`、`prompts/list` |
+| 变更通知 | 需轮询或额外加 WebSocket | 原生 `notifications/tools/list_changed`、`resources/updated` |
+| 传输 | HTTP | stdio（本地子进程）/ Streamable HTTP（远程） |
+| 语义粒度 | 资源/动作随便定义 | 统一三原语：Tools / Resources / Prompts |
+
+**核心区别：**MCP 把"AI 应用 ↔ 工具/数据源"这个特定场景需要的握手、能力发现、双向通知、订阅推送都内建到协议里，不用每家再造一遍。HTTP API 更通用但什么都得自己拼。
+
+---
+
+### Q7. 一次完整的 MCP 工具调用详细流程是什么？
+
+1. **启动 (Initialization)**：Host 启动指定 Server——本地走 stdio 子进程，远程走 Streamable HTTP 连接。
+2. **握手 (Handshake)**：Client 发 `initialize` 请求，附带 `protocolVersion`、`capabilities`、`clientInfo`；Server 返回自己的版本和 capabilities。Client 紧接着发 `notifications/initialized`，会话进入 ready 状态。
+3. **能力发现 (Discovery)**：Client 调 `tools/list`（必要时分页），拿到工具清单（name、description、inputSchema）。Host 把它们翻译成 LLM 的 function-calling schema 注入对话。
+4. **模型推理 (Reasoning)**：LLM 根据用户意图，通过 function calling 输出结构化 tool-call（工具名 + 参数）。
+5. **工具调用 (Invocation)**：Host 把 tool-call 转给对应 Client；Client 发 `tools/call` 请求到 Server。
+6. **执行返回 (Execution)**：Server 跑业务逻辑（查 DB、调外部 API、跑本地命令…），把 `content` 通过 `tools/call` 响应回传。
+7. **结果续写 (Continuation)**：Host 把 Server 返回内容拼回对话，喂给 LLM 继续生成最终回答。
+8. **事件订阅 (Notifications)**：会话期间，Server 工具列表变化会推 `notifications/tools/list_changed`，Resources 变化会推 `notifications/resources/updated`，Client 据此重新拉取或刷新订阅。
+9. **关闭 (Shutdown)**：Host 在不需要时正常关闭传输，结束会话。
+
+---
+
+### Q8. MCP 中的工具发现机制是主动拉取还是被动推送？
+
+> **答：以"主动拉取"为主，"被动推送"为辅——是 pull + event 混合模型。**
+
+- **主动拉取（pull）**：Client 通过 `tools/list`、`resources/list`、`prompts/list` 主动获取能力清单。通常在 initialize 之后立即拉一次，并支持分页（cursor-based pagination）。
+- **被动推送（push / notification）**：Server 可发送 `notifications/tools/list_changed`、`notifications/prompts/list_changed`，通知 Client 列表已变，Client 收到后再去重新 list。
+- **Resources 还有更细的订阅**：Client 通过 `resources/subscribe` 显式订阅某个 URI，Server 在该资源变更时推送 `notifications/resources/updated`。
+
+**设计哲学：**拉取保证 Client 拿到一致快照（避免推送丢失/乱序问题）；推送让 Client 知道何时该重新拉，避免无意义轮询。
+
+---
+
+### Q9. Agent 系统中基于 MCP 做多工具编排有做过吗？怎么做？
+
+> **核心思路：**一个 Host 同时持有多个 Client，每个 Client 连一个独立 Server（GitHub、文件系统、数据库、Slack 各一个），Host 在调用前把多 Server 的能力聚合到 LLM 的工具空间。
+
+1. **能力聚合**：Host 启动后并行连接所有 Server，分别调 `tools/list`，把工具清单合并。**命名冲突**用 namespace 前缀解决（如 `github__create_issue`、`db__query`）。
+2. **编排策略**：
+
+   - 简单场景：直接把全集喂 LLM，靠模型自己规划调用链（ReAct / plan-and-execute）
+   - 复杂场景：在 Host 层加 routing/policy，按用户意图先做能力裁剪，只暴露相关子集
+3. **结果回传**：Host 把每次 `tools/call` 返回的内容拼入对话上下文，让 LLM 决定下一步调谁。
+4. **权限与审计**：高危 tool（destructive 操作）走二次确认；所有 tool-call 落审计日志。
+5. **成本控制**：连的 Server 越多，schema 注入 token 越多——做能力按需启用（lazy connect）、对模型隐藏低频工具。
+
+---
+
+### Q10. MCP 的安全机制知道哪些？沙箱隔离、密钥管理怎么做？
+
+
+> **信任与授权**
+> - **用户同意（user consent）**：spec 规定 Server 工具被调用前 Host SHOULD 取得显式授权，尤其 destructive 操作
+> - **OAuth 2.0 + Metadata Discovery**：远程 Server 走 `/.well-known/oauth-authorization-server` 或 OIDC，per-user token
+> - **本地凭证**：通过子进程环境变量或系统 keychain 传入，Host 不直接持有
+
+
+> **沙箱与隔离**
+> - **进程隔离**：Server 通常作为独立进程（stdio 子进程或独立服务）运行，凭证不跨 Server 共享
+> - **Roots 能力**：Client 通过 roots 告诉 Server"只能在这些 URI 范围内活动"，限制文件系统等访问范围
+> - **Capability 协商**：initialize 时双方声明 capabilities，没声明的能力不可用
+
+
+> **主要风险点：**
+> - **提示词注入**：Server 返回的 tool content 会进入 LLM 上下文，恶意 Server 可塞入恶意 instruction → 只用可信来源 Server，对外部内容做隔离
+> - **令牌透传攻击**：Server 拿到用户 OAuth token 后可能滥用 → 最小权限授权 + 短期 token
+> - **tool 描述被污染**："tool poisoning" — 看似无害的 description 里隐藏指令 → Host 应展示真实 description 给用户审阅
+
+---
+
+### Q11. 项目里看你有用 MCP，什么是 MCP？
+
+> **定义：**MCP（Model Context Protocol，模型上下文协议）是 **Anthropic 于 2024 年 11 月开源**的开放协议，目标是建立一套统一标准，让任意 LLM 应用都能和任意外部数据源、工具、API 无缝集成。
+
+- **本质**：基于 **JSON-RPC 2.0** 的**有状态会话协议**，定义了 Host-Client-Server 三角架构
+- **原语**：Server 通过 **Tools**（动作）、**Resources**（数据）、**Prompts**（模板）三种原语对外暴露能力
+- **类比**："AI 应用的 USB-C 接口"——把 M×N 集成困境降到 M+N
+- **生态**：2025 年 12 月已捐给 **Linux 基金会下的 Agentic AI Foundation**，与 OpenAI 的 AGENTS.md、Block 的 goose 一起成为行业开放治理标准
+- **支持方**：Claude Desktop、Cursor、Windsurf、VSCode 插件等均已实现 MCP Client
+
+---
+
+### Q12. 我们常说 MCP 是 AI 的 USB-C 接口，你怎么理解这句话？
+
+这个比喻强调三点：
+
+1. **统一物理/逻辑接口**：USB-C 之前每种设备 × 每种线缆都要定制；USB-C 之后只要两端都支持，就能即插即用。MCP 同理——以前每个 AI 应用 × 每个工具都要定制集成，MCP 之后两端各实现一次协议就能互连。
+2. **关注点分离**：USB-C 协议只规定"怎么传"，不规定"传什么数据"；MCP 也只规定能力发现、调用、通知的传输标准，具体业务语义由 Server 自定义。
+3. **带来生态网络效应**：USB-C 出现后整个外设生态围绕它形成；MCP 出现后 AI 工具生态也开始围绕它形成（Claude Desktop、Cursor 等 Client + 大量第三方 Server）。
+
+> **比喻的局限要点出来：**USB-C 是物理层，插上就能用；MCP 还涉及能力协商、授权、上下文语义、安全模型，不光是"插上"那么简单。能力发现 + 用户同意 + 沙箱这些都是物理接口类比覆盖不到的部分。
+
+---
+
+### Q13. MCP Server 的 Tools、Resources、Prompts 了解吗，都啥时候使用啊？
+
+| 原语 | 语义 | 谁触发 | 典型场景 |
+|-|-|-|-|
+| **Tools**  <br/>（工具） | 可执行动作，可能有副作用 | **LLM** 主动调用（function calling） | 写数据库、发邮件、跑命令、调 API |
+| **Resources**  <br/>（资源） | 被动可读的数据/上下文，由 URI 标识 | **Host/用户**主动注入，或 LLM 通过 `resources/read` 读取；可订阅变化 | 文件内容、日志、文档片段、数据库快照 |
+| **Prompts**  <br/>（模板） | 服务端预定义的对话模板/工作流脚本 | **用户**主动选择（如 slash command） | "代码审查 prompt"、"生成周报 prompt"、IDE 一键调用 |
+
+> **取舍口诀：**
+> - 要让 **LLM 做事** → **Tools**（"我想让它能 commit"）
+> - 要给 **LLM 看东西** → **Resources**（"我想让它能读到代码"）
+> - 要给 **用户一个一键模板** → **Prompts**（"我想让用户点一下就触发标准流程"）
+
+---
+
+### Q14. MCP 基于啥知道吗？
+
+> **分层看 MCP 的技术栈：**
+
+1. **消息格式：JSON-RPC 2.0**——所有请求/响应/通知都是标准 JSON-RPC 消息（`jsonrpc: "2.0"`、`id`、`method`、`params`）。
+2. **会话语义：自定义 stateful session protocol**——initialize 握手 → 能力协商 → 长会话 → shutdown。
+3. **传输层（Transport）**：官方两种：
+
+   - **stdio**：本地子进程，最常见，最小依赖
+   - **Streamable HTTP**：远程场景，单一 HTTP 端点支持双向 + SSE 流式响应；2025 spec 推荐新部署直接用这个，逐步淘汰早期的 HTTP+SSE 双端点设计
+4. **认证：OAuth 2.0**——远程 Server 走标准 OAuth 2.0，最新 spec 引入 Authorization Server Metadata Discovery（`/.well-known/oauth-authorization-server` 或 `/.well-known/openid-configuration`）。
+5. **Schema 定义**：用 TypeScript 写 schema，编译生成 JSON Schema 供其他语言（Python、Go、Rust、C# 等）绑定。
+
+---
+
+### Q15. MCP 和 RAG 区别是什么？
+
+> **核心区别：不在同一层，不是替代关系。**RAG 是**应用层模式**（怎么把外部知识喂给 LLM），MCP 是**协议层标准**（应用 ↔ 外部能力的传输规范）。
+
+| 维度 | RAG | MCP |
+|-|-|-|
+| 本质 | 检索增强生成的**架构模式** | 能力接入的**开放协议** |
+| 范围 | 只解决"检索相关上下文喂给模型" | 覆盖工具调用、资源订阅、模板、双向消息（sampling/elicitation） |
+| 模式 | 单向：retrieve → inject → generate | 双向有状态会话，支持服务端推送 |
+| 典型实现 | 向量库 + embedding + reranker + prompt 拼接 | MCP Server 暴露 Tools/Resources/Prompts |
+
+> **二者可以结合：**完全可以用 MCP 实现 RAG——写一个 MCP Server，它的 `Resources` 提供向量检索结果，`Tools` 提供 `search_kb` 函数。MCP 为 RAG 提供了一种**标准化的能力接入方式**，但 MCP 自身的能力远超 RAG（还能做 action / 双向通信）。
+
+---
+
+## 一、微软为什么要用 CLI 替掉 MCP？
+
+> **题眼提醒：**这道题藏了一个"坑"——微软并没有完全用 CLI 替掉 MCP。准确地说，微软走的是一条**混合路线**：CLI + Skills 处理大部分本地开发场景，MCP 退守到企业级多租户和 OAuth 认证场景。
+
+上周有个学员跟我说，他面一家做 AI 基础设施的公司，二面的时候技术总监突然抛了个开放题——"你怎么看微软用 CLI 替掉 MCP 这件事？"
+
+他当时愣了一下，因为这题没有标准答案，考的就是你平时有没有跟进 Agent 工具链这波争论，以及你能不能把工程直觉讲清楚。我觉得这题特别值得拿出来聊聊，我们来拆一下。
+
+首先你要明确一点，**这道题的题眼其实藏了一个"坑"**。
+
+微软并没有完全用 CLI 替掉 MCP。准确地说，微软走的是一条"混合路线"，CLI + Skills 处理大部分本地开发场景，MCP 退守到企业级多租户和 OAuth 认证场景。你答题的时候如果上来就说"因为 MCP 不行所以微软会换了"，那就掉坑里了。面试官想听的是你对这个技术决策背后工程权衡的理解。
+
+### MCP 的三个核心痛点
+
+好，我们先讲清楚 MCP 到底出了什么问题，这是整道题的起点。
+
+> **痛点一：Token 开销巨大**
+
+MCP 最致命的问题就是 token 开销。这个不是理论推演，是有实打实的 benchmark 数据的。GitHub 的 Copilot MCP Server 暴露了 43 个工具，每次 Agent 发起调用的时候，这 43 个工具的完整 schema 定义会全部注入到上下文窗口里。你想想，Agent 可能就想查一下"这个 repo 用的什么语言"，结果它得先把 webhook 管理、gist 创建、PR review 配置这些完全不相关的工具定义全读一遍。
+
+| 对比项 | CLI | MCP |
+|-|-|-|
+| 简单任务 token 消耗 | 1,365 tokens | 44,000 tokens |
+| SKILL.md 等效场景 | 200 tokens | 50,000 tokens（差距 250 倍） |
+
+在长上下文模型依然昂贵的今天，这个差距直接决定了一个 AI 产品是赚钱还是亏钱。
+
+> **痛点二：可靠性差**
+
+同样有 benchmark，跑 25 次 MCP 调用，**7 次因为 TCP 超时直接失败了，成功率只有 72%**。而 CLI 是 25 次全过，**100%**。原因很简单，MCP 依赖远程服务器，网络抖动、服务端超时这些问题你躲不掉。CLI 呢？gh 命令跑在本地，根本不存在远程服务器超时的问题。
+
+> **痛点三：认证复杂**
+
+这个 Garry Tan 吐槽得最狠，他说 MCP 的 auth UX 简直灾难，每个 MCP Server 都要单独认证，还要手动开关服务器。他自己花了 30 分钟写了个 CLI wrapper，100 行代码，效果比 MCP 好一百倍。Perplexity 的 CTO Denis Yarats 也是类似的判断，直接在内部宣布放弃 MCP，回归传统 API 和 CLI。
+
+### 微软的混合方案
+
+好，问题讲清楚了，接下来我们看看微软具体是怎么做的。
+
+微软的方案核心是两个东西：**Agent Skills 规范**和 **.NET Skills Executor**。简单说就是，微软搞了一套以 SKILL.md 文件为核心的技能系统。每个 Skill 就是一个 Markdown 文件，里面用自然语言描述这个工具是干什么的、怎么用、有哪些参数。Agent 在运行时按需加载这些 Skill，而不是像 MCP 那样一股脑把所有工具定义塞进上下文。
+
+> **渐进式披露：**你用什么我才加载什么，静止状态下一个 Skill 只占 30 到 50 个 token。
+
+执行层面，本地工具直接走 CLI，gh、kubectl、aws 这些命令行工具本身就是 Agent 最天然的接口。Unix 哲学"一切皆文本流"的设计，天然适合 LLM 去理解和操作。而且这些工具已经存在了几十年，生态成熟、文档丰富，LLM 在预训练阶段就已经见过大量相关语料了，不需要额外的 schema 描述它就知道怎么用。
+
+但是注意，**微软并没有把 MCP 一刀切掉**。在 .NET Skills Executor 的架构里，当涉及到跨系统的 OAuth 认证、多租户数据隔离、SaaS 服务调用这些场景时，后台还是会静默调用 MCP。这就是微软的"混合式"架构——Skill 层用 Markdown 做语义压缩来引导 AI，执行层 CLI 和 MCP 各司其职。
+
+### 关键洞察
+
+> **CLI 和 MCP 的分野，本质上不是技术优劣的问题，而是"你的 Agent 在替谁干活"的问题。**
+
+
+> **CLI 适用场景**
+> Agent 替开发者自己跑自动化脚本。CLI 完胜，因为它继承你本地的凭证、你本地的权限，快、便宜、可靠。
+
+
+> **MCP 适用场景**
+> B2B 产品中，Agent 代表客户员工去操作客户的 GitHub / Jira / Slack。需要 per-user OAuth 授权、租户级别数据隔离、可审计的操作记录——这些 CLI 给不了你。
+
+
+### 答题框架总结
+
+1. **先纠正题目的隐含假设**——不是"替掉"，是"混合"
+2. **讲清楚 MCP 的三个工程痛点**：token 膨胀、可靠性差、认证复杂
+3. **讲微软的具体方案**：Skills + CLI 做前台，MCP 退守后台
+4. **拔高一层，点出本质判断**——这不是协议之争，而是"Agent 替谁干活"决定了你该用哪种架构
+
+能把这四层讲清楚，这道题基本上就拿满分了。
+
+---
+
+## 二、Agent Skills 和 MCP 有什么区别？
+
+> **结论先行：**MCP 和 Agent Skills **不是竞争关系**。MCP 解决"**连接**"问题（能力层），让 AI 能够访问外部世界；Skills 解决"**方法论**"问题（知识层），教 AI 怎么去做某类任务。**MCP 给 Agent 提供工具箱，Skills 教 Agent 怎么用这些工具。**
+
+最近的 AI Agent 面试题中，有个学员被问到："Agent Skills 和 MCP 到底有什么区别？"他回答说一个是技能一个是协议，面试官追问"那为什么 Anthropic 要同时搞两套机制？"他就卡住了。
+
+这道题其实挺有意思，表面上问的是两个技术的区别，实际上考察的是你对 AI Agent 系统架构的理解深度。我们来看看这道题应该怎么答。
+
+### 先说结论，建立框架
+
+首先你要明确一点，MCP 和 Agent Skills 不是竞争关系，它们根本就不在一个层面上。这就像问你"数据库和函数有什么区别"一样，一个是存储能力的，一个是调用逻辑的，压根不是二选一的问题。
+
+如果用一句话概括的话：**MCP 解决的是"连接"问题**，让 AI 能够访问外部世界；**Skills 解决的是"方法论"问题**，教 AI 怎么去做某类任务。你可以理解为 MCP 是**能力层**，Skills 是**知识层**。
+
+### MCP 的本质：标准化的集成协议
+
+我们先看 MCP。Model Context Protocol 是 Anthropic 在 **2024 年 11 月**开源的一个协议标准，它的定位就是"AI 应用的 USB-C 接口"。什么意思呢？就是说以前你要让 AI 连接 GitHub，得写一套集成代码；连接 Slack，又得写一套；连接数据库，再写一套。每个集成都定制化的，没有统一标准。
+
+MCP 就是来解决这个问题的。它基于 **JSON-RPC 2.0 协议**，定义了一套标准的客户端-服务器架构。你写一个 MCP Server，暴露出 **Tools、Resources、Prompts** 这三种原语，然后任何支持 MCP 的 AI 应用都能直接连上来用。
+
+> **关键点：MCP 在集成层工作。**它关心的是"AI 能访问什么外部系统"，比如能不能查数据库、能不能调 API、能不能读文件。MCP Server 是一个独立运行的进程，有自己的运行时环境、自己的权限范围。这种进程隔离的设计其实是出于安全考虑——每个 Server 只能访问它被授权的资源，GitHub 的 Server 拿不到你 Slack 的 token。
+
+但是 MCP 也有代价。**最大的问题是 token 消耗**。因为 MCP 的工作方式是在对话开始时，把所有可用工具的定义都加载到上下文里。你连了 10 个 MCP Server，每个暴露 5 个工具，那就是 50 个工具定义，可能直接占掉几千个 token。
+
+### Agent Skills 的设计哲学：渐进式信息公开
+
+再看 Skills。Agent Skills 是 Anthropic 在 **2025 年 10 月**推出的，它的设计理念完全不同。Skills 本质上是一个文件夹，里面有个 SKILL.md 文件，写着"遇到某类任务应该怎么做"。比如你有个代码审查的 Skill，里面会写：第一步检查安全漏洞，第二步看性能问题，第三步检查代码风格。
+
+Skills 最精妙的地方在于它的**渐进式加载机制**。这是 Anthropic 在上下文工程领域的一个重要实践。它分三层加载：
+
+| 加载层级 | 加载内容 | Token 消耗 |
+|-|-|-|
+| 第一层 | Skill 的名字和描述 | \~100 tokens |
+| 第二层 | 完整的 SKILL.md（判断相关后加载） | 几千 tokens |
+| 第三层 | 支持文件（按需加载更多信息） | 视具体内容 |
+
+这个设计直接解决了 MCP 的 token 消耗问题。你可以有几十个 Skills，但同时只加载一两个。上下文窗口的利用效率大幅提升。
+
+关键是，**Skills 工作在知识层**。它不提供访问外部系统的能力，它提供的是"专业知识"和"工作流程"。Skills 不能直接去查数据库，但它能告诉 AI"拿到数据之后应该怎么分析"。
+
+### 架构层级的本质区别
+
+现在我们把这两个东西放到架构图里看。从上到下是这样的：
+
+1. 用户请求进来，首先经过 **Skills 层**，Skills 注入专业知识和方法论
+2. 然后到 **LLM 推理层**，模型理解请求，决定需要什么工具
+3. 接着到 **MCP 集成层**，MCP 连接外部系统执行具体操作
+4. 最后触达**外部世界**，比如数据库、API、文件系统
+
+> Skills 在上层，MCP 在下层。**Skills 是"怎么做"，MCP 是"能做什么"**。这就是为什么说它们是互补的，不是替代的。
+
+举个实际例子。用户说"帮我审查 PR 456 并按照团队规范给建议"。这个请求的执行流程是：先通过 MCP 的 GitHub Server 获取 PR 信息，然后 Skills 提供团队的代码审查规范，Claude 按照 Skill 的指导分析代码，最后再通过 MCP 提交评论。整个过程中，MCP 负责"能访问什么"，Skills 负责"怎么做"。
+
+### 技术实现上的差异
+
+| 维度 | MCP | Agent Skills |
+|-|-|-|
+| **本质形态** | 完整协议栈，独立 Server 进程 | 文件夹 + SKILL.md Markdown 文件 |
+| **运行依赖** | 认证、错误处理、传输层 | 文件系统读取，无需额外进程 |
+| **开放性** | 跨平台开放标准（Claude Desktop、Cursor、Windsurf 等） | 目前 Anthropic 生态专属 |
+| **触发机制** | 持久连接，工具随时可用 | 基于语义匹配自动触发 |
+| **关键依赖** | Server 配置 & 网络 | SKILL.md 的 description 质量 |
+
+### 安全模型的考量
+
+
+> **MCP 安全模型**
+> 进程隔离天然提供安全边界，每个 Server 只能访问被授权的资源。但 MCP Server 本身有问题仍可能泄露凭证，能抓取外部内容时会引入 **prompt injection** 风险。
+
+
+> **Skills 安全模型**
+> Skills 本质上是注入指令到对话历史，恶意的 Skill 可以在长文件里藏恶意指令。建议**只用可信来源的 Skills**，并用 `allowed-tools` 字段限制 Skill 能调用的工具范围。
+
+
+### 实际应用的选择策略
+
+> **什么时候用哪个？**
+
+- **需要让 AI 访问外部系统**（查数据库、调 API、读写文件、连接第三方服务）→ **必须用 MCP**，Skills 干不了这个
+- **需要编码领域知识、工作流程、团队规范、最佳实践**（代码审查标准、数据分析标准流程、客服话术模板等）→ **用 Skills**
+- **很多时候两者结合使用**：MCP 提供访问能力，Skills 提供使用这些能力的方法论。这才是完整的 Agent 系统。
+
+### 面试答题框架
+
+1. 首先明确它们**不是竞争关系而是互补关系**
+2. 从**架构层级**说明 MCP 在集成层、Skills 在知识层
+3. 讲各自的**技术特点和适用场景**
+4. 举个**实际例子**说明两者如何配合工作
+
+> **加分点：**MCP 已经在 **2025 年 12 月**捐给了 Linux 基金会下的 Agentic AI Foundation，和 OpenAI 的 AGENTS.md、Block 的 goose 一起成为开放治理的标准。这说明 MCP 已经从 Anthropic 的内部工具演进成了行业基础设施。而 Skills 目前还是 Anthropic 生态专属，这也反映了两者不同的定位。
+
+> **核心总结：**这道题背后考察的是你有没有真正理解现代 AI Agent 系统的架构哲学。能力和知识是两个层面的问题，需要不同的机制来解决。**MCP 让 AI 有了"手"，能触碰外部世界；Skills 让 AI 有了"大脑"，知道怎么思考和行动。两者缺一不可。**

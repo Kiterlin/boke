@@ -1,12 +1,14 @@
 import Link from "next/link";
-import { ArrowRight, BookOpen, Layers, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { ArticleCard } from "@/components/article-card";
 import { FadeIn } from "@/components/animated";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { getAllCategories, getAllPosts, getAllTags, getFeaturedPosts } from "@/lib/posts";
+import { formatDate } from "@/lib/utils";
 
 export default function HomePage() {
   const posts = getAllPosts();
@@ -17,103 +19,135 @@ export default function HomePage() {
 
   return (
     <div>
-      <section className="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 md:py-24 lg:grid-cols-[1.08fr_0.92fr] lg:px-8">
-        <FadeIn className="flex flex-col justify-center">
-          <Badge variant="accent" className="w-fit">
-            AI · Computer Vision · Multimodal
-          </Badge>
-          <h1 className="mt-6 max-w-4xl text-balance text-5xl font-semibold leading-[1.04] tracking-normal sm:text-6xl lg:text-7xl">
-            把 AI 研究、工程实践与项目复盘，沉淀为长期可检索的知识。
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
-            DeepFrame Lab 专注于 AI、计算机视觉与多模态技术，分享研究思考、项目复盘与高质量开发经验。
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Button asChild size="lg" variant="accent">
-              <Link href="/blog">
-                阅读文章
-                <ArrowRight />
-              </Link>
-            </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link href="/search">搜索知识库</Link>
-            </Button>
+      <section className="mx-auto max-w-6xl px-4 py-12 sm:px-6 md:py-16 lg:px-8">
+        <FadeIn className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-end">
+          <div>
+            <Badge variant="accent">Research Blog</Badge>
+            <h1 className="mt-5 max-w-4xl text-balance text-4xl font-semibold leading-tight tracking-normal sm:text-5xl">
+              DeepFrame Lab
+            </h1>
+            <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground sm:text-lg">
+              面向 AI、计算机视觉与工程实践的技术编辑部。这里保留研究判断、项目复盘和可以反复引用的开发经验。
+            </p>
           </div>
-        </FadeIn>
-
-        <FadeIn delay={0.12} className="lg:pt-10">
-          <div className="grid gap-4">
-            <Card className="overflow-hidden bg-primary text-primary-foreground">
-              <div className="p-7">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-primary-foreground/70">Content Signal</span>
-                  <Sparkles className="size-5" />
-                </div>
-                <p className="mt-12 text-4xl font-semibold tracking-normal">{posts.length}</p>
-                <p className="mt-2 text-sm text-primary-foreground/70">篇本地文章已接入检索、RSS 和站点地图</p>
+          <div className="border-l pl-5 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">内容索引</p>
+            <dl className="mt-4 grid grid-cols-3 gap-4 lg:grid-cols-1">
+              <div>
+                <dt>文章</dt>
+                <dd className="mt-1 font-mono text-xl text-foreground">{posts.length}</dd>
               </div>
-            </Card>
-            <div className="grid grid-cols-2 gap-4">
-              <Card className="bg-card/72 p-6 backdrop-blur">
-                <Layers className="mb-8 size-5 text-accent" />
-                <p className="text-3xl font-semibold">{categories.length}</p>
-                <p className="mt-2 text-sm text-muted-foreground">内容分类</p>
-              </Card>
-              <Card className="bg-card/72 p-6 backdrop-blur">
-                <BookOpen className="mb-8 size-5 text-accent" />
-                <p className="text-3xl font-semibold">{tags.length}+</p>
-                <p className="mt-2 text-sm text-muted-foreground">主题标签</p>
-              </Card>
-            </div>
+              <div>
+                <dt>分类</dt>
+                <dd className="mt-1 font-mono text-xl text-foreground">{categories.length}</dd>
+              </div>
+              <div>
+                <dt>标签</dt>
+                <dd className="mt-1 font-mono text-xl text-foreground">{getAllTags().length}</dd>
+              </div>
+            </dl>
           </div>
         </FadeIn>
       </section>
 
-      <section className="border-y bg-card/40">
-        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-accent">Featured</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-normal">精选深度文章</h2>
+      <section className="border-y bg-secondary/35">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
+          <FadeIn>
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-accent">Editors Pick</p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-normal">精选文章</h2>
+              </div>
+              <Button asChild variant="outline">
+                <Link href="/blog">
+                  全部文章
+                  <ArrowRight />
+                </Link>
+              </Button>
             </div>
-            <Button asChild variant="outline">
-              <Link href="/blog">
-                全部文章
-                <ArrowRight />
-              </Link>
-            </Button>
-          </div>
-          <div className="grid gap-5 md:grid-cols-3">
-            {(featured.length ? featured : latest.slice(0, 3)).map((post) => (
-              <ArticleCard key={post.slug} post={post} featured />
-            ))}
-          </div>
+            {(featured[0] || latest[0]) ? (
+              <Card className="overflow-hidden">
+                <Link href={`/blog/${(featured[0] || latest[0]).slug}`} className="block p-6 sm:p-7">
+                  <Badge variant="accent">{(featured[0] || latest[0]).category}</Badge>
+                  <h3 className="mt-5 text-balance text-3xl font-semibold leading-tight tracking-normal sm:text-4xl">
+                    {(featured[0] || latest[0]).title}
+                  </h3>
+                  <p className="mt-4 max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
+                    {(featured[0] || latest[0]).description}
+                  </p>
+                  <div className="mt-8 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <time dateTime={(featured[0] || latest[0]).date}>
+                      {formatDate((featured[0] || latest[0]).date)}
+                    </time>
+                    <span className="h-px w-5 bg-border" />
+                    <span>{(featured[0] || latest[0]).readingTime}</span>
+                  </div>
+                </Link>
+              </Card>
+            ) : null}
+          </FadeIn>
+
+          <FadeIn delay={0.08}>
+            <div className="mb-5">
+              <p className="text-sm font-medium text-accent">Latest</p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-normal">最新更新</h2>
+            </div>
+            <div className="grid gap-0 border-y">
+              {latest.map((post, index) => (
+                <Link
+                  key={post.slug}
+                  href={`/blog/${post.slug}`}
+                  className="group grid gap-2 border-b py-4 last:border-b-0"
+                >
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <span>{post.category}</span>
+                    <span className="h-px w-4 bg-border" />
+                    <time dateTime={post.date}>{formatDate(post.date)}</time>
+                  </div>
+                  <h3 className="text-lg font-semibold leading-snug tracking-normal group-hover:text-accent">
+                    {post.title}
+                  </h3>
+                  {index === 0 ? (
+                    <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
+                      {post.description}
+                    </p>
+                  ) : null}
+                </Link>
+              ))}
+            </div>
+          </FadeIn>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.86fr_1.14fr] lg:px-8">
+      <section className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[0.32fr_0.68fr] lg:px-8">
         <div>
-          <p className="text-sm font-medium text-accent">Latest</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-normal">最新更新</h2>
-          <p className="mt-4 max-w-md text-sm leading-7 text-muted-foreground">
-            首页优先露出近期内容，同时通过标签与分类帮助读者快速建立知识地图。
+          <p className="text-sm font-medium text-accent">Topics</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-normal">主题入口</h2>
+          <p className="mt-4 text-sm leading-7 text-muted-foreground">
+            用标签和分类组织长期内容，方便读者从一个问题进入一组文章。
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             {tags.map((tag) => (
               <Link
                 key={tag.slug}
                 href={`/tags/${tag.slug}`}
-                className="rounded-full border bg-background/70 px-3 py-1.5 text-sm text-muted-foreground hover:border-accent hover:text-foreground"
+                className="rounded-sm border bg-card px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-accent/60 hover:text-foreground"
               >
                 {tag.name}
               </Link>
             ))}
           </div>
         </div>
-        <div className="grid gap-4">
-          {latest.map((post) => (
-            <ArticleCard key={post.slug} post={post} />
-          ))}
+        <div>
+          <div className="mb-6 flex items-center gap-4">
+            <h2 className="text-2xl font-semibold tracking-normal">文章目录</h2>
+            <Separator className="flex-1" />
+          </div>
+          <div className="grid gap-5 md:grid-cols-2">
+            {latest.map((post) => (
+              <ArticleCard key={post.slug} post={post} />
+            ))}
+          </div>
         </div>
       </section>
     </div>
