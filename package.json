@@ -16,6 +16,7 @@
     "@radix-ui/react-slot": "latest",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/postcss": "latest",
+    "@vercel/speed-insights": "^2.0.0",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "gray-matter": "latest",
