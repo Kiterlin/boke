@@ -22,7 +22,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   );
   return pageMetadata({
     title: match ? `分类：${match.name}` : "分类",
-    description: match ? `查看 ${match.name} 分类下的文章。` : "查看分类文章。",
+    description: match ? match.description : "查看分类文章。",
     path: `/categories/${category}`
   });
 }
@@ -42,7 +42,10 @@ export default async function CategoryPage({ params }: Props) {
       <h1 className="mt-4 text-balance text-4xl font-semibold tracking-normal sm:text-5xl">
         {match.name}
       </h1>
-      <p className="mt-5 text-muted-foreground">{posts.length} 篇文章归档在此分类下。</p>
+      <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
+        {match.description}
+      </p>
+      <p className="mt-4 text-sm text-muted-foreground">{posts.length} 篇文章归档在此分类下。</p>
       <Separator className="my-10" />
       <div className="grid gap-5 md:grid-cols-2">
         {posts.map((post) => (

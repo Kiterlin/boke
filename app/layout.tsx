@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Geist, JetBrains_Mono, Noto_Sans_SC } from "next/font/google";
 import "katex/dist/katex.min.css";
 
 import "./globals.css";
@@ -8,6 +9,25 @@ import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { pageMetadata } from "@/lib/metadata";
 import { siteConfig } from "@/lib/site";
+
+const geistSans = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist",
+  display: "swap"
+});
+
+const notoSansSc = Noto_Sans_SC({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-noto-sans-sc",
+  display: "swap"
+});
+
+const jetBrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap"
+});
 
 export const metadata: Metadata = {
   ...pageMetadata({
@@ -33,7 +53,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className="font-sans antialiased">
+      <body
+        className={`${geistSans.variable} ${notoSansSc.variable} ${jetBrainsMono.variable} font-sans antialiased`}
+      >
         <a href="#content" className="skip-link">
           跳到正文
         </a>

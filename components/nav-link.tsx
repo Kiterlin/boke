@@ -23,8 +23,8 @@ export function NavLink({
       onClick={onClick}
       aria-current={isActive ? "page" : undefined}
       className={cn(
-        "rounded-sm px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground",
-        isActive && "bg-secondary text-foreground"
+        "rounded-full px-3 py-2 text-sm font-medium text-muted-foreground transition-all duration-200 hover:bg-secondary/80 hover:text-foreground",
+        isActive && "bg-secondary text-foreground shadow-sm shadow-foreground/[0.03]"
       )}
     >
       {label}

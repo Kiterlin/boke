@@ -8,7 +8,7 @@ import { getAllCategories } from "@/lib/posts";
 
 export const metadata: Metadata = pageMetadata({
   title: "分类",
-  description: "查看所有博客分类。",
+  description: "以内容类型浏览 DeepFrame Lab 的核心分类。",
   path: "/categories"
 });
 
@@ -22,7 +22,7 @@ export default function CategoriesPage() {
         分类
       </h1>
       <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
-        按内容类型组织文章，方便从研究、工程、设计与分发视角浏览。
+        按内容类型组织文章，帮助读者先判断阅读目的，再进入对应的文章集合。
       </p>
       <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {categories.map((category) => (
@@ -31,6 +31,9 @@ export default function CategoriesPage() {
               <span className="text-lg font-semibold">{category.name}</span>
               <span className="mt-2 block text-sm text-muted-foreground">
                 {category.count} 篇文章
+              </span>
+              <span className="mt-4 block text-sm leading-6 text-muted-foreground">
+                {category.description}
               </span>
             </Link>
           </Card>

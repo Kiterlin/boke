@@ -4,10 +4,17 @@ description: "面向参数高效微调的系统学习手册，覆盖 LoRA、P-Tu
 date: "2026-05-31"
 category: "学习文档"
 tags: ["PEFT", "LoRA", "QLoRA", "微调", "学习笔记"]
-author: "Feishu Knowledge Base"
+author: "Sun Lupeng · DeepFrame Lab"
 featured: true
+tldr: "一份从微调基础到 PEFT 实操的系统手册，覆盖 Transformer 前置知识、LoRA/P-Tuning/QLoRA/IA3、peft 库和 LLaMA-Factory 训练流程。"
+audience:
+  - "刚开始系统学习大模型微调和 PEFT 的读者"
+  - "需要按章节搭建 LoRA、QLoRA 实验环境的工程师"
+takeaways:
+  - "理解为什么全量微调在大模型时代成本过高"
+  - "区分 LoRA、P-Tuning、QLoRA 和 IA3 的适用场景"
+  - "跑通 peft 与 LLaMA-Factory 的基础训练、保存和推理流程"
 ---
-# PEFT 微调入门到实战学习手册（详细完整版）
 
 > **本手册定位：** 零基础 → 能独立跑通微调 → 理解每一行代码、每一个参数、每一个 Python 包。  
 > **配套文件：**
@@ -17,6 +24,39 @@ featured: true
 **工作目录：** `/home/sunlupeng/my-projects/实习/微调`（下文所有路径都基于这个工作空间）
 
 ---
+
+<SectionLead>
+这篇文章按“先建立显存账本，再拆方法谱系，最后落到训练脚本”的顺序组织。阅读时不需要一次记住所有 API，先抓住 PEFT 的共同结构：冻结主干、训练少量旁路参数、把工程成本压回单卡可控范围。
+</SectionLead>
+
+<KeyTakeaways title="阅读路径">
+
+- 先看第 0 章，建立全量微调为什么昂贵的成本模型。
+- 再看第 1-4 章，把 LoRA、P-Tuning、QLoRA、IA3 放在同一张方法地图里比较。
+- 最后看第 5-7 章，按 peft 与 LLaMA-Factory 的命令、配置和保存路径跑通实验。
+
+</KeyTakeaways>
+
+<InfoCard title="建议的实验顺序" variant="definition">
+不要一开始就尝试完整业务数据集。先用 20-50 条样例跑通 tokenizer、dataset、trainer、adapter 保存与加载，再扩大到真实数据。PEFT 的大部分排错都发生在数据格式、target_modules 和量化配置三处。
+</InfoCard>
+
+<QuoteBlock variant="highlight" source="PEFT 选型原则">
+先用 LoRA 建立强基线；显存不够时切 QLoRA；任务模板稳定且参数预算极低时再考虑 P-Tuning 或 IA3。
+</QuoteBlock>
+
+<Figure
+  src="diagram-03-memory-ledger-7b.png"
+  alt="7B 模型显存账本"
+  caption="先把显存账本算清楚，再决定用 LoRA、QLoRA 还是更轻的提示类方法。"
+/>
+
+<ResourceLink
+  type="paper"
+  title="LoRA: Low-Rank Adaptation of Large Language Models"
+  url="https://arxiv.org/abs/2106.09685"
+  description="LoRA 的原始论文，建议配合第 1 章的公式推导阅读。"
+/>
 
 ## 目录
 
@@ -280,7 +320,9 @@ PEFT 的核心改造点就是 $W_q, W_k, W_v, W_o$ 这四个投影矩阵。
 
 ### 0.3 PEFT 四大主流方法一句话区分
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<InfoCard title="方法谱系读法" variant="reference">
+把四种方法按“改哪里”来记：LoRA 改权重旁路，P-Tuning 改输入/注意力前缀，QLoRA 改基座存储精度再叠加 LoRA，IA3 改激活值缩放。这个维度比单纯背参数量更稳。
+</InfoCard>
 
 为了避免后续章节展开时迷失在细节里，先用一句话把四种方法的差异性钉死，建立一个稳定的心智地图。读后面章节时，遇到不确定的时候随时可以翻回这一节快速对齐。
 
@@ -746,7 +788,16 @@ LoRA 的核心假设是同样的：
 
 ### 1.3 数学原理逐步推导（六个 Step）
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={1}
+  src="diagram-01-lora-bypass-structure.png"
+  title="LoRA 旁路结构与冻结权重"
+  caption="原始线性层保持冻结，LoRA 只训练低秩旁路 A/B；推理时可把旁路合并回主权重。"
+/>
+
+<InfoCard title="LoRA 推导的三步主线" variant="tip">
+第一步，冻结原始权重，把 `W0` 当成稳定的预训练知识库；第二步，用 `A`、`B` 两个小矩阵逼近任务需要的 `ΔW`；第三步，训练后按 `Wmerged = W0 + α/r · BA` 合并权重，消除推理旁路延迟。
+</InfoCard>
 
 下面我们用六个 Step，把 LoRA 的前向公式从"原始线性层"一步步演化出来。每一步只引入一个新概念，看完你就能在白板上自己推导出来。这是面试中最容易被追问的部分，建议反复练习直到能脱稿。
 
@@ -875,6 +926,17 @@ $$|\theta_{\text{LoRA}}| = r \cdot (d + k)$$
 | Adam 状态 | 56 GB | \~0.4 GB | \~0.4 GB |
 | 激活值 | 6 GB | 6 GB | 6 GB |
 | **总计** | **\~90 GB** | **\~20 GB** | **\~10 GB** |
+
+<Diagram
+  number={2}
+  src="diagram-03-memory-ledger-7b.png"
+  title="7B 模型全量微调与 PEFT 的显存账本"
+  caption="冻结主干参数后，梯度和 Adam 状态不再为全部权重维护，显存压力从集群级降到单卡级。"
+/>
+
+<Callout variant="summary" title="Full FT 与 PEFT 的本质差异">
+Full Fine-Tuning 让每个权重都参与反向传播，梯度、Adam 状态和主权重副本会同步膨胀；LoRA / QLoRA 冻结主干，只让优化器状态跟随少量适配器参数，因此更适合单卡、快速迭代和多任务适配。
+</Callout>
 
 ### 1.5 LoRA 的关键超参数：每一个都讲透
 
@@ -1514,6 +1576,17 @@ LoRA 旁路确实会带来 \~5% 的额外开销。如果在意速度，部署前
 
 如果说 LoRA 是从"修改权重"的角度做微调，那 P-Tuning 就是另一条完全不同的路线——它不动模型本身的任何参数，只在输入侧加一段"模型能听懂的密语"。这条路线背后有一个非常深刻的哲学：**让模型按你的方式行动，未必要改造模型本体，改造输入信号也行**。这一章我们会沿着提示工程的演进史，逐步看清这条路是如何从"硬提示"走到 P-Tuning v2 的。
 
+<Diagram
+  number={3}
+  src="diagram-02-ptuning-v1-vs-v2.png"
+  title="P-Tuning v1 与 v2 的提示插入位置"
+  caption="v1 主要在输入端学习连续提示，v2 将深度提示注入多层 Transformer，稳定性和表达力更强。"
+/>
+
+<Callout variant="note" title="选型提醒">
+P-Tuning 的优势不是“比 LoRA 更通用”，而是在参数量极小、任务模板稳定、输入输出形式固定时更轻。生成式任务、复杂指令微调和需要合并部署的场景，仍然优先考虑 LoRA / QLoRA。
+</Callout>
+
 ### 2.1 提示工程的演进史
 
 P-Tuning 是"提示词演进史"上重要的一环。先理清几代方法的演进脉络：
@@ -1686,7 +1759,12 @@ $$\tilde{\mathbf{p}}_{0:m-1} = \text{PromptEncoder}(\mathbf{p}_{0:m-1})$$
 
 ### 2.4 P-Tuning v2 的"深度提示"改进
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={5}
+  src="diagram-02-ptuning-v1-vs-v2.png"
+  title="P-Tuning v1 与 v2 的提示插入位置"
+  caption="v1 只在输入端提供连续提示，v2 在多层注入 deep prompt，因此中小模型上的信号衰减更少。"
+/>
 
 v1 已经在大模型上跑出了不错的成绩，但社区很快发现一个棘手现象：模型规模越小，v1 的效果越差。这背后的原因是什么？v2 的设计动机正是为了解决这个问题。
 
@@ -2073,7 +2151,12 @@ INT4 假设权重均匀分布，但实际预训练权重近似**正态分布**�
 
 ### 3.2 为什么需要 QLoRA？显存账本计算
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={6}
+  src="diagram-03-memory-ledger-7b.png"
+  title="QLoRA 前后的 7B 显存账本"
+  caption="QLoRA 额外压缩的是基座权重存储：从 BF16 的 14 GB 降到 NF4 的约 3.5 GB，同时仍只训练 LoRA 旁路。"
+/>
 
 第 0 章和第 1 章我们都算过显存账本，这里再算一次是为了把 QLoRA 的"基座压缩"效应单独凸显出来。注意看下表里"模型权重"这一列，从 14GB 到 3.5GB 的跨越是 QLoRA 的招牌动作。
 
@@ -2962,7 +3045,12 @@ for name, module in model.named_modules():
 
 ## 第 6 章 LLaMA-Factory 系统全流程实战
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={4}
+  src="diagram-04-llama-factory-pipeline.png"
+  title="LLaMA-Factory 从数据到导出的训练流水线"
+  caption="把数据格式、数据集注册、训练配置、评估和导出串成可复用的工程流程。"
+/>
 
 `peft` 已经把微调封装得很优雅，但工程上仍有一些重复劳动：数据格式转换、训练监控、量化导出、Web UI 等。LLaMA-Factory 正是为消除这些重复而生——它把所有最佳实践打包成一个 YAML 配置 + 一行 CLI 命令的工作流。本章我们从安装讲起，逐步深入到 YAML 的每一行字段，最后给出五种典型任务的配置模板。
 

@@ -4,10 +4,17 @@ description: "从模型是无状态概率函数这一第一性原理出发，解
 date: "2026-06-01"
 category: "Agent 工程"
 tags: ["Agent", "Harness", "上下文工程", "工程实践"]
-author: "Feishu Knowledge Base"
+author: "Sun Lupeng · DeepFrame Lab"
 featured: true
+tldr: "从“模型是无状态概率函数”出发，解释 Agent 漂移的根源，并把 Prompt、Context、Harness 串成一套可落地的长任务工作环境设计方法。"
+audience:
+  - "正在使用 Coding Agent 或构建 Agent 工作流的工程师"
+  - "需要给团队沉淀 AGENTS.md、规则文件和反馈环路的技术负责人"
+takeaways:
+  - "为什么长任务里的 Agent 漂移不能只靠更强模型解决"
+  - "Harness 五件套如何约束输入、工具、执行和反馈"
+  - "如何把仓库文档、Linter 和上下文管理变成 Agent 的工作环境"
 ---
-# Harness 工程深入解读：当模型是函数、Agent 是新员工，你该给它配什么样的"工作环境"
 
 > 这是我对 Harness 工程的"深入版"重写。和上一版从概念溯源出发不同，这一版换了个起点——从"模型到底是什么"这个第一性问题切入，一路推到"为什么会有 Harness 工程、它每一条原则的物理根源是什么、放到你自己的项目里要怎么落"。目标是写完这一篇之后，你不仅记得 Harness 工程是什么，更能在面对任何 Agent 异常行为时，自己推导出该补哪一片缰绳。
 

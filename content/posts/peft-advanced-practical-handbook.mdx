@@ -4,15 +4,51 @@ description: "围绕 PEFT 工程实战和面试准备，深入拆解 LoRA、QLoR
 date: "2026-05-30"
 category: "学习文档"
 tags: ["PEFT", "LoRA", "面试准备", "工程实践"]
-author: "Feishu Knowledge Base"
+author: "Sun Lupeng · DeepFrame Lab"
+tldr: "面向 PEFT 工程实战和面试复盘，集中拆解 LoRA、QLoRA、P-Tuning、LLaMA-Factory、多 LoRA 推理和常见训练排错。"
+audience:
+  - "已经了解大模型微调基础、想补工程细节的读者"
+  - "准备围绕 PEFT、LoRA 和训练排错展开技术面试的人"
+takeaways:
+  - "从数学、代码和 peft API 三层理解 LoRA"
+  - "掌握 QLoRA、P-Tuning 和多 LoRA 推理的工程取舍"
+  - "形成训练配置、评估和排错的实战清单"
 ---
-# 参数高效微调（PEFT）进阶实战手册
 
 > **适用场景：** 多模态目标检测 / CV 大模型微调面试准备 + 工程实战  
 > **工作空间：** `/home/sunlupeng/my-projects/实习/微调`  
 > **前置要求：** 熟悉 Transformer 架构、PyTorch 基础、HuggingFace 生态
 
 ---
+
+<SectionLead>
+这份进阶手册面向“已经跑过一次 LoRA，但需要解释清楚为什么这样配、为什么会省显存、为什么某些训练会发散”的读者。正文保留数学推导和代码细节，同时把关键判断点整理成可复用的工程卡片。
+</SectionLead>
+
+<KeyTakeaways title="进阶阅读重点">
+
+- 用显存账本解释 PEFT 的成本优势，而不是只背“训练参数少”。
+- 用梯度路径解释 LoRA 的初始化、训练初期 loss 平缓和 LoRA+ 的动机。
+- 用量化桶和冻结旁路解释 QLoRA 为什么能在 4-bit 权重上稳定训练。
+
+</KeyTakeaways>
+
+<InfoCard title="面试追问清单" variant="reference">
+LoRA 初始化要解释 `B=0` 和 `A` 随机的梯度后果；显存节省要落到“冻结参数不保存梯度和 Adam m/v 状态”；QLoRA 要区分 4-bit 存储与 BF16/FP16 计算；部署要说清楚合并权重和动态多适配器的取舍。
+</InfoCard>
+
+<Figure
+  src="diagram-02-lora-forward-gradient.png"
+  alt="LoRA 前向与梯度路径"
+  caption="初始化和梯度路径决定了 LoRA 训练早期的动力学。"
+/>
+
+<ResourceLink
+  type="paper"
+  title="QLoRA: Efficient Finetuning of Quantized LLMs"
+  url="https://arxiv.org/abs/2305.14314"
+  description="QLoRA、NF4、双重量化和分页优化器的原始论文。"
+/>
 
 ## 目录
 
@@ -52,7 +88,12 @@ PEFT 这条路线之所以能"以小博大"，并不是简单的"训练更少的
 
 ### 1.2 显存账本：为什么 56 GB 装不进 24 GB
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={1}
+  src="diagram-01-memory-ledger-peft.png"
+  title="PEFT 显存账本拆解"
+  caption="PEFT 的核心节省来自冻结参数不保存梯度和优化器状态，而不是让基座权重消失。"
+/>
 
 把 7B 模型在 FP16 精度下做全量微调的显存账本展开如下：
 
@@ -96,7 +137,16 @@ PEFT 的"省"主要来自第 ② ③ 项：冻结的预训练权重不需要存�
 
 ### 2.1 数学原理推导
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={2}
+  src="diagram-02-lora-forward-gradient.png"
+  title="LoRA 前向与梯度路径"
+  caption="B=0 初始化让模型从原始行为起步，训练早期先更新 B，再逐步激活 A 的梯度。"
+/>
+
+<InfoCard title="LoRA 的三段式解释" variant="tip">
+先说 `W0` 冻结，前向仍提供预训练能力；再说 `A/B` 低秩旁路承接任务差异；最后说生产部署可以合并权重追求低延迟，也可以保留多个 adapter 做任务切换。
+</InfoCard>
 
 LoRA（Low-Rank Adaptation of Large Language Models）由微软研究院的 Hu 等人在 2021 年提出。论文中最重要的实验结论是：**用占原模型 0.01% 的参数，达到了与全量微调几乎相同（甚至略好）的效果**。这一结论一经发布即在开源社区引发地震，至今仍是大模型微调的事实标准。本节我们从假设出发，逐步推导出 LoRA 的前向公式、初始化、梯度流和合并规则。
 
@@ -552,7 +602,16 @@ print(f"\nLoRA 适配器将保存到: {save_path}")
 
 ### 2.4 LoRA 的主流变种
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={3}
+  src="diagram-03-lora-variants-family.png"
+  title="LoRA 变体家族与适用边界"
+  caption="rsLoRA、DoRA、LoRA+ 等变体分别处理大 rank 稳定性、幅度/方向解耦和优化器配置问题。"
+/>
+
+<QuoteBlock variant="pull" source="变体选型">
+标准 LoRA 适合先建立强基线；DoRA 处理低 rank 表达力不足；rsLoRA 处理大 rank 稳定性；LoRA+ 用不同学习率改善训练初期收敛速度。
+</QuoteBlock>
 
 LoRA 诞生后的几年内，社区涌现出大量变种，每个都针对 LoRA 的某个具体痛点。下面整理出最值得了解的六个变种——既是面试加分项，也对实际选型有帮助。
 
@@ -755,7 +814,16 @@ peft 库的 `PromptEncoderConfig` 支持两种 Encoder：
 
 ### 4.1 NF4 量化原理
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={4}
+  src="diagram-04-int4-vs-nf4.png"
+  title="INT4 与 NF4 量化桶对比"
+  caption="NF4 为正态分布权重设计非均匀量化桶，比线性 INT4 更贴合大模型权重分布。"
+/>
+
+<Callout variant="warning" title="不要把存储精度和计算精度混为一谈">
+QLoRA 的基座权重以 4-bit NF4 存储，但前向计算会临时反量化到 BF16/FP16；LoRA 旁路本身也保持可训练的高精度参数。面试时如果只说“用 4-bit 训练”，容易被追问到数值稳定性。
+</Callout>
 
 QLoRA 由华盛顿大学的 Dettmers 等人在 2023 年提出，是 LoRA 的"显存极限版"。它的真正意义不是发明了一个新的微调方法，而是把"4-bit 量化"与"LoRA"无缝结合，证明了**在量化后的模型上做 LoRA 几乎不掉点**——这一发现让消费级显卡微调 33B、65B 模型成为可能，工业界的 GenAI 训练成本一夜之间降低一个数量级。
 
@@ -868,7 +936,12 @@ TrainingArguments(optim="paged_adamw_8bit")
 
 ### 4.3 QLoRA + LoRA 联合机制
 
-> 原飞书文档此处包含画板，文章版保留文字说明。
+<Diagram
+  number={5}
+  src="diagram-05-qlora-joint-mechanism.png"
+  title="QLoRA 的冻结量化权重与 LoRA 训练旁路"
+  caption="基座权重以 4-bit 形式常驻显存，反向传播只更新 LoRA 旁路，从而兼顾显存和效果。"
+/>
 
 QLoRA 的微调范式是：
 

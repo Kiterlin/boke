@@ -9,7 +9,7 @@ export const siteConfig = {
   url:
     process.env.NEXT_PUBLIC_SITE_URL ||
     (vercelUrl ? `https://${vercelUrl}` : "http://localhost:3000"),
-  author: "DeepFrame Team",
+  author: "Sun Lupeng · DeepFrame Lab",
   nav: [
     { href: "/", label: "首页" },
     { href: "/blog", label: "文章" },

@@ -3,10 +3,11 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    monospace;
+  --font-sans: var(--font-geist), var(--font-noto-sans-sc), "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -32,42 +33,42 @@
 }
 
 :root {
-  --radius: 0.5rem;
-  --background: oklch(0.974 0.006 88);
-  --foreground: oklch(0.18 0.012 95);
-  --card: oklch(0.99 0.004 88);
-  --card-foreground: oklch(0.18 0.012 95);
-  --popover: oklch(0.99 0.004 88);
-  --popover-foreground: oklch(0.18 0.012 95);
-  --primary: oklch(0.23 0.014 95);
-  --primary-foreground: oklch(0.98 0.005 88);
-  --secondary: oklch(0.935 0.007 88);
-  --secondary-foreground: oklch(0.24 0.014 95);
-  --muted: oklch(0.94 0.007 88);
-  --muted-foreground: oklch(0.47 0.018 95);
-  --accent: oklch(0.43 0.07 155);
-  --accent-foreground: oklch(0.98 0.005 88);
+  --radius: 0.875rem;
+  --background: oklch(0.99 0.002 96);
+  --foreground: oklch(0.17 0.004 96);
+  --card: oklch(0.985 0.002 96);
+  --card-foreground: oklch(0.17 0.004 96);
+  --popover: oklch(0.995 0.002 96);
+  --popover-foreground: oklch(0.17 0.004 96);
+  --primary: oklch(0.18 0.004 96);
+  --primary-foreground: oklch(0.99 0.002 96);
+  --secondary: oklch(0.955 0.003 96);
+  --secondary-foreground: oklch(0.22 0.004 96);
+  --muted: oklch(0.95 0.003 96);
+  --muted-foreground: oklch(0.47 0.005 96);
+  --accent: oklch(0.55 0.075 165);
+  --accent-foreground: oklch(0.99 0.002 96);
   --destructive: oklch(0.52 0.17 28);
-  --border: oklch(0.86 0.01 88);
-  --input: oklch(0.84 0.012 88);
-  --ring: oklch(0.43 0.07 155);
+  --border: oklch(0.89 0.004 96);
+  --input: oklch(0.88 0.004 96);
+  --ring: oklch(0.55 0.075 165);
 }
 
 .dark {
-  --background: oklch(0.16 0.009 95);
-  --foreground: oklch(0.92 0.006 88);
-  --card: oklch(0.19 0.01 95);
-  --card-foreground: oklch(0.92 0.006 88);
-  --popover: oklch(0.19 0.01 95);
-  --popover-foreground: oklch(0.92 0.006 88);
-  --primary: oklch(0.9 0.006 88);
-  --primary-foreground: oklch(0.16 0.009 95);
-  --secondary: oklch(0.24 0.011 95);
-  --secondary-foreground: oklch(0.9 0.006 88);
-  --muted: oklch(0.24 0.011 95);
-  --muted-foreground: oklch(0.68 0.012 88);
-  --accent: oklch(0.65 0.075 155);
-  --accent-foreground: oklch(0.13 0.015 155);
+  --background: oklch(0.145 0.003 96);
+  --foreground: oklch(0.93 0.003 96);
+  --card: oklch(0.19 0.004 96);
+  --card-foreground: oklch(0.93 0.003 96);
+  --popover: oklch(0.19 0.004 96);
+  --popover-foreground: oklch(0.93 0.003 96);
+  --primary: oklch(0.92 0.003 96);
+  --primary-foreground: oklch(0.15 0.003 96);
+  --secondary: oklch(0.24 0.004 96);
+  --secondary-foreground: oklch(0.92 0.003 96);
+  --muted: oklch(0.24 0.004 96);
+  --muted-foreground: oklch(0.69 0.004 96);
+  --accent: oklch(0.67 0.082 165);
+  --accent-foreground: oklch(0.13 0.018 165);
   --destructive: oklch(0.62 0.16 28);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
@@ -75,20 +76,50 @@
 }
 
 * {
+  box-sizing: border-box;
   border-color: var(--border);
 }
 
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html {
+  overflow-x: clip;
   scroll-behavior: smooth;
+  scroll-padding-top: 6rem;
 }
 
 body {
   min-height: 100dvh;
-  background: var(--background);
+  overflow-x: clip;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--background) 94%, var(--secondary)) 0%,
+      var(--background) 36rem
+    );
   color: var(--foreground);
   font-family: var(--font-sans);
   font-feature-settings: "rlig" 1, "calt" 1;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  background-image:
+    radial-gradient(color-mix(in oklab, var(--foreground) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(180deg, transparent, color-mix(in oklab, var(--secondary) 34%, transparent));
+  background-size: 1.125rem 1.125rem, 100% 100%;
+  mask-image: linear-gradient(to bottom, black, transparent 40rem);
+  opacity: 0.42;
 }
 
 ::selection {
@@ -114,97 +145,406 @@ body {
   transform: translateY(0);
 }
 
+/* ═══════════════════════════════════════════════════════
+   Prose Content — Research Blog Article Typography
+   ═══════════════════════════════════════════════════════ */
+
 .prose-content {
   color: var(--foreground);
   font-size: 1.0625rem;
+  line-height: 1.85;
+  font-feature-settings: "rlig" 1, "calt" 1;
 }
 
+/* ── Headings ── */
 .prose-content :where(h2, h3, h4) {
   scroll-margin-top: 7rem;
-  letter-spacing: 0;
   text-wrap: balance;
 }
 
 .prose-content h2 {
-  margin-top: 3.25rem;
-  margin-bottom: 1rem;
-  border-top: 1px solid var(--border);
-  padding-top: 1.5rem;
-  font-size: clamp(1.55rem, 2.1vw, 2rem);
-  line-height: 1.2;
-  font-weight: 650;
+  margin-top: 3.5rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+
+.prose-content h2:first-child {
+  margin-top: 0;
 }
 
 .prose-content h3 {
-  margin-top: 2.35rem;
+  margin-top: 2.5rem;
   margin-bottom: 0.75rem;
-  font-size: 1.25rem;
-  line-height: 1.25;
-  font-weight: 650;
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.45;
+  color: color-mix(in oklab, var(--foreground) 90%, transparent);
 }
 
-.prose-content p,
-.prose-content li {
-  color: color-mix(in oklab, var(--foreground) 80%, transparent);
-  line-height: 1.9;
+.prose-content h4 {
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: color-mix(in oklab, var(--foreground) 85%, transparent);
 }
 
+/* ── Heading anchor links ── */
+.prose-content h2 a[href^="#"],
+.prose-content h3 a[href^="#"] {
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  margin-left: 0.5rem;
+}
+
+.prose-content h2:hover a[href^="#"],
+.prose-content h3:hover a[href^="#"] {
+  opacity: 0.4;
+}
+
+.prose-content h2 a[href^="#"]:hover,
+.prose-content h3 a[href^="#"]:hover {
+  opacity: 1;
+}
+
+/* ── Paragraphs ── */
 .prose-content p {
-  margin: 1rem 0;
+  margin: 1.25rem 0;
   max-width: 68ch;
   text-wrap: pretty;
+  word-break: break-word;
+  color: color-mix(in oklab, var(--foreground) 80%, transparent);
 }
 
+.prose-content p:first-child {
+  margin-top: 0;
+}
+
+/* ── Links ── */
 .prose-content a {
-  color: color-mix(in oklab, var(--accent) 70%, var(--foreground));
+  color: var(--accent);
   text-decoration: underline;
-  text-underline-offset: 0.25em;
-  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 0.07em;
+  text-decoration-color: color-mix(in oklab, var(--accent) 25%, transparent);
+  transition: text-decoration-color 150ms ease;
+  font-weight: 500;
 }
 
-.prose-content ul,
-.prose-content ol {
-  margin: 1rem 0 1.5rem 1.25rem;
+.prose-content a:hover {
+  text-decoration-color: color-mix(in oklab, var(--accent) 60%, transparent);
 }
 
-.prose-content blockquote {
-  margin: 2rem 0;
-  max-width: 68ch;
-  border-left: 2px solid var(--accent);
-  padding: 0.25rem 0 0.25rem 1rem;
-  color: color-mix(in oklab, var(--foreground) 82%, transparent);
-  font-size: 1.02rem;
+/* ── Strong / Bold ── */
+.prose-content strong {
+  font-weight: 600;
+  color: color-mix(in oklab, var(--foreground) 92%, transparent);
 }
 
+/* ── Inline code ── */
 .prose-content code:not(pre code) {
   border-radius: 0.3rem;
-  background: color-mix(in oklab, var(--muted) 76%, transparent);
-  padding: 0.15rem 0.38rem;
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
+  padding: 0.15rem 0.4rem;
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 0.875em;
+  font-weight: 450;
+  color: color-mix(in oklab, var(--foreground) 85%, transparent);
+  word-break: break-word;
 }
 
+.dark .prose-content code:not(pre code) {
+  background: color-mix(in oklab, white, transparent 90%);
+}
+
+/* ── Code blocks (rehype-pretty-code output) ── */
 .prose-content pre {
-  margin: 1.5rem 0;
-  max-width: 100%;
+  margin: 1.75rem 0;
+  max-width: 68ch;
   overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: oklch(0.2 0.012 95);
-  padding: 1rem;
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+  border-radius: var(--radius-xl);
+  background: #0d1117;
+  padding: 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.75;
+}
+
+.dark .prose-content pre {
+  background: #0d1117;
 }
 
 .prose-content pre code {
   font-family: var(--font-mono);
-  font-size: 0.88rem;
+  font-size: 0.875rem;
+  line-height: 1.75;
+  font-weight: 400;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  color: #e6edf3;
+}
+
+/* ── Code block title ── */
+[data-rehype-pretty-code-title] {
+  margin-top: 1.75rem !important;
+  margin-bottom: 0 !important;
+  max-width: 68ch;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  color: var(--muted-foreground);
+  background: oklch(0.23 0.01 95);
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+  border-bottom: none;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+}
+
+[data-rehype-pretty-code-title] + pre {
+  margin-top: 0 !important;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
+
+/* ── Code block line numbers ── */
+code[data-line-numbers] {
+  counter-reset: line;
+}
+
+code[data-line-numbers] > [data-line]::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 2.5ch;
+  margin-right: 1.25ch;
+  text-align: right;
+  color: oklch(0.55 0.01 95);
+  font-size: 0.8em;
+  opacity: 0.5;
+}
+
+[data-highlighted-line] {
+  background: oklch(1 0 0 / 0.06);
+  border-left: 3px solid var(--accent);
+  padding-left: calc(1.25rem - 3px);
+}
+
+/* ── Lists ── */
+.prose-content ul,
+.prose-content ol {
+  margin: 1.25rem 0;
+  max-width: 68ch;
+  padding-left: 1.5rem;
+}
+
+.prose-content ul {
+  list-style-type: disc;
+}
+
+.prose-content ol {
+  list-style-type: decimal;
+}
+
+.prose-content ul > li,
+.prose-content ol > li {
+  color: color-mix(in oklab, var(--foreground) 80%, transparent);
+  line-height: 1.85;
+  margin: 0.35rem 0;
+}
+
+.prose-content ul > li::marker {
+  color: color-mix(in oklab, var(--accent) 50%, transparent);
+}
+
+.prose-content ol > li::marker {
+  color: var(--muted-foreground);
+}
+
+/* Nested lists */
+.prose-content ul ul,
+.prose-content ol ol,
+.prose-content ul ol,
+.prose-content ol ul {
+  margin: 0.25rem 0;
+}
+
+/* ── Blockquotes ── */
+.prose-content blockquote {
+  margin: 2rem 0;
+  max-width: 68ch;
+  border-left: 3px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  padding: 0.75rem 0 0.75rem 1.25rem;
+  color: color-mix(in oklab, var(--foreground) 72%, transparent);
+  font-style: italic;
+  background: color-mix(in oklab, var(--accent) 4%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* ── Tables (plain markdown tables) ── */
+.prose-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  margin: 1.5rem 0;
+}
+
+.prose-content th {
+  background: color-mix(in oklab, var(--secondary) 60%, transparent);
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+}
+
+.prose-content td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+  color: color-mix(in oklab, var(--foreground) 78%, transparent);
+}
+
+.prose-content tr:last-child td {
+  border-bottom: none;
+}
+
+.prose-content tbody tr {
+  transition: background 120ms ease;
+}
+
+.prose-content tbody tr:hover {
+  background: color-mix(in oklab, var(--accent) 3%, transparent);
+}
+
+/* ── Images (plain markdown images not handled by Figure) ── */
+.prose-content img {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  max-width: 100%;
+  height: auto;
+  margin: 1.5rem 0;
+}
+
+.prose-content figure img {
+  margin: 0;
+}
+
+/* ── Horizontal rule ── */
+.prose-content hr {
+  margin: 2.5rem 0;
+  border: none;
+  border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+}
+
+/* ── KaTeX math ── */
+.prose-content .katex {
+  font-size: 1.05em;
+}
+
+.prose-content .katex-display {
+  margin: 1.5rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ── Lists inside rich content blocks (Callout / InfoCard / StepList) ── */
+.block-prose ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+
+.block-prose ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  list-style: decimal;
+}
+
+.block-prose li {
+  margin: 0.2rem 0;
   line-height: 1.7;
 }
 
-.prose-content img {
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+.block-prose li::marker {
+  color: color-mix(in oklab, var(--accent) 50%, transparent);
 }
 
+.block-prose ul ul,
+.block-prose ol ol,
+.block-prose ul ol,
+.block-prose ol ul {
+  margin: 0.2rem 0;
+}
+
+/* ── Responsive adjustments ── */
+@media (max-width: 640px) {
+  .prose-content {
+    font-size: 1rem;
+    line-height: 1.8;
+  }
+
+  .prose-content h2 {
+    font-size: 1.4rem;
+    margin-top: 2.5rem;
+  }
+
+  .prose-content h3 {
+    font-size: 1.1rem;
+    margin-top: 2rem;
+  }
+
+  .prose-content pre {
+    font-size: 0.8125rem;
+    padding: 1rem;
+    border-radius: var(--radius-lg);
+  }
+
+  .prose-content table {
+    font-size: 0.8125rem;
+  }
+
+  .prose-content th,
+  .prose-content td {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .prose-content p {
+    line-height: 1.8;
+  }
+}
+
+/* ── Touch-friendly tap targets on mobile ── */
+@media (pointer: coarse) {
+  .prose-content a {
+    padding: 0.125rem 0;
+  }
+}
+
+/* ── Print styles ── */
+@media print {
+  .prose-content {
+    font-size: 11pt;
+    line-height: 1.6;
+  }
+
+  .prose-content pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+}
+
+/* ── Reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

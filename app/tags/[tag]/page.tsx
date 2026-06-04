@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const match = getAllTags().find((item) => item.slug === decodeURIComponent(tag));
   return pageMetadata({
     title: match ? `标签：${match.name}` : "标签",
-    description: match ? `查看 ${match.name} 标签下的文章。` : "查看标签文章。",
+    description: match ? match.description : "查看标签文章。",
     path: `/tags/${tag}`
   });
 }
@@ -38,7 +38,10 @@ export default async function TagPage({ params }: Props) {
       <h1 className="mt-4 text-balance text-4xl font-semibold tracking-normal sm:text-5xl">
         {match.name}
       </h1>
-      <p className="mt-5 text-muted-foreground">{posts.length} 篇文章归档在此标签下。</p>
+      <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
+        {match.description}
+      </p>
+      <p className="mt-4 text-sm text-muted-foreground">{posts.length} 篇文章归档在此标签下。</p>
       <Separator className="my-10" />
       <div className="grid gap-5 md:grid-cols-2">
         {posts.map((post) => (
