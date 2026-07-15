@@ -23,7 +23,7 @@ export function MobileNav() {
       <SheetTrigger asChild>
         <Button
           size="icon"
-          variant="outline"
+          variant="ghost"
           className="lg:hidden"
           aria-label={open ? "关闭菜单" : "打开菜单"}
           aria-expanded={open}
@@ -33,8 +33,8 @@ export function MobileNav() {
       </SheetTrigger>
       <SheetContent>
         <SheetHeader>
-          <SheetTitle>{siteConfig.name}</SheetTitle>
-          <SheetDescription>文章、主题与订阅入口</SheetDescription>
+          <SheetTitle>Sun Lupeng / {siteConfig.name}</SheetTitle>
+          <SheetDescription>研究、工程实践与长期写作档案</SheetDescription>
         </SheetHeader>
         <nav className="grid gap-1" aria-label="移动端导航">
           {siteConfig.nav.map((item) => (

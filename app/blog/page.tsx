@@ -3,8 +3,6 @@ import Link from "next/link";
 
 import { ArticleCard } from "@/components/article-card";
 import { FadeIn } from "@/components/animated";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { pageMetadata } from "@/lib/metadata";
 import { getAllCategories, getAllPosts } from "@/lib/posts";
 
@@ -19,48 +17,43 @@ export default function BlogPage() {
   const categories = getAllCategories();
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-      <FadeIn className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-end">
-        <div>
-          <Badge variant="accent">Archive</Badge>
-          <h1 className="mt-4 text-balance text-4xl font-semibold tracking-normal sm:text-5xl">
-            文章列表
-          </h1>
-          <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
-            按发布时间整理 Agent 工程、PEFT 学习文档与 MCP 面试题等知识库文章。
+    <div className="editorial-shell pb-24 pt-14 sm:pt-20">
+      <FadeIn className="grid gap-10 border-b border-border/80 pb-14 lg:grid-cols-12 lg:items-end">
+        <div className="lg:col-span-8">
+          <p className="editorial-kicker">Writing archive</p>
+          <h1 className="display-title mt-6 text-5xl leading-none sm:text-7xl">文章与长期笔记</h1>
+          <p className="mt-7 max-w-2xl text-base leading-8 text-muted-foreground">
+            不追逐短期资讯，主要记录 Agent 工程、参数高效微调、工具协议与研究方法中值得长期引用的上下文和判断。
           </p>
         </div>
-        <dl className="grid grid-cols-2 gap-4 border-l pl-5 text-sm text-muted-foreground lg:grid-cols-1">
+        <dl className="grid grid-cols-2 border-l border-border/80 pl-5 lg:col-span-3 lg:col-start-10">
           <div>
-            <dt>文章</dt>
-            <dd className="mt-1 font-mono text-xl text-foreground">{posts.length}</dd>
+            <dt className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Articles</dt>
+            <dd className="mt-2 font-mono text-2xl">{String(posts.length).padStart(2, "0")}</dd>
           </div>
           <div>
-            <dt>分类</dt>
-            <dd className="mt-1 font-mono text-xl text-foreground">{categories.length}</dd>
+            <dt className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sections</dt>
+            <dd className="mt-2 font-mono text-2xl">{String(categories.length).padStart(2, "0")}</dd>
           </div>
         </dl>
       </FadeIn>
 
-      <div className="mt-10 flex flex-wrap gap-2">
-        {categories.map((category) => (
-          <Link
-            key={category.slug}
-            href={`/categories/${category.slug}`}
-            className="rounded-sm border bg-card px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-accent/60 hover:text-foreground"
-          >
-            {category.name} · {category.count}
-          </Link>
-        ))}
-      </div>
-
-      <Separator className="my-10" />
-
-      <div className="grid gap-5 md:grid-cols-2">
-        {posts.map((post) => (
-          <ArticleCard key={post.slug} post={post} />
-        ))}
-      </div>
+      <FadeIn className="grid gap-10 pt-10 lg:grid-cols-12">
+        <aside className="lg:col-span-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Browse by category</p>
+          <nav className="mt-5 grid border-t border-border/80" aria-label="文章分类">
+            {categories.map((category) => (
+              <Link key={category.slug} href={`/categories/${category.slug}`} className="flex items-center justify-between border-b border-border/80 py-3 text-sm transition-colors hover:text-accent">
+                <span>{category.name}</span>
+                <span className="font-mono text-[10px] text-muted-foreground">{String(category.count).padStart(2, "0")}</span>
+              </Link>
+            ))}
+          </nav>
+        </aside>
+        <div className="lg:col-span-8 lg:col-start-5">
+          {posts.map((post, index) => <ArticleCard key={post.slug} post={post} index={index} />)}
+        </div>
+      </FadeIn>
     </div>
   );
 }

@@ -6,10 +6,14 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
+  return Array.from(value.normalize("NFKC").toLowerCase().trim())
+    .map((character) => {
+      if (/[a-z0-9]/.test(character)) return character;
+      if (/[^\p{L}\p{N}]/u.test(character)) return "-";
+      return `-u${character.codePointAt(0)?.toString(16)}-`;
+    })
+    .join("")
+    .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
 

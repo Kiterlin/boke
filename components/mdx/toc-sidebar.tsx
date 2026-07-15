@@ -16,7 +16,7 @@ function TocLink({ item, activeId }: { item: TocItem; activeId: string }) {
         "block truncate text-sm leading-6 transition-all duration-150",
         item.level === 3 ? "pl-4 text-[0.8125rem]" : "",
         isActive
-          ? "font-medium text-accent before:absolute before:inset-y-0 before:-left-5 before:w-0.5 before:rounded-full before:bg-accent relative"
+          ? "font-medium text-accent before:absolute before:inset-y-0 before:-left-5 before:w-px before:bg-accent relative"
           : "text-muted-foreground hover:text-foreground",
       )}
     >
@@ -61,7 +61,7 @@ export function TOCSidebar({
 
   return (
     <aside className="hidden lg:block">
-      <nav className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto border-l border-border/60 pl-5">
+      <nav className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto border-l border-border/80 pl-5">
         {/* Header */}
         <div className="mb-5">
           <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground/60">
@@ -96,7 +96,7 @@ export function MobileTOC({ toc }: { toc: TocItem[] }) {
       {/* Floating trigger button */}
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex size-12 items-center justify-center rounded-full bg-accent text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+        className="fixed bottom-6 right-6 z-40 flex size-12 items-center justify-center rounded-sm bg-accent text-white shadow-lg transition-transform hover:-translate-y-0.5 active:translate-y-px"
         aria-label="打开目录"
       >
         <List className="size-5" />
@@ -109,7 +109,7 @@ export function MobileTOC({ toc }: { toc: TocItem[] }) {
             className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           />
-          <div className="fixed bottom-0 left-0 right-0 z-50 max-h-[65vh] overflow-y-auto rounded-t-2xl bg-card p-6 shadow-2xl">
+          <div className="fixed bottom-0 left-0 right-0 z-50 max-h-[65vh] overflow-y-auto border-t border-border bg-card p-6 shadow-2xl">
             {/* Sheet handle */}
             <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-border" />
 

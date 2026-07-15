@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { ArticleCard } from "@/components/article-card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { pageMetadata } from "@/lib/metadata";
 import { getAllTags, getPostsByTag } from "@/lib/posts";
 
 type Props = {
   params: Promise<{ tag: string }>;
 };
+
+export const dynamicParams = false;
 
 export async function generateStaticParams() {
   return getAllTags().map((tag) => ({ tag: tag.slug }));
@@ -33,19 +33,18 @@ export default async function TagPage({ params }: Props) {
   if (!match || posts.length === 0) notFound();
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-      <Badge variant="accent">Tag</Badge>
-      <h1 className="mt-4 text-balance text-4xl font-semibold tracking-normal sm:text-5xl">
+    <div className="editorial-shell pb-24 pt-14 sm:pt-20">
+      <p className="editorial-kicker">Topic archive</p>
+      <h1 className="display-title mt-6 text-balance text-5xl sm:text-7xl">
         {match.name}
       </h1>
       <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
         {match.description}
       </p>
-      <p className="mt-4 text-sm text-muted-foreground">{posts.length} 篇文章归档在此标签下。</p>
-      <Separator className="my-10" />
-      <div className="grid gap-5 md:grid-cols-2">
-        {posts.map((post) => (
-          <ArticleCard key={post.slug} post={post} />
+      <p className="mt-5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{posts.length} 篇文章归档在此标签下</p>
+      <div className="mt-10 max-w-5xl">
+        {posts.map((post, index) => (
+          <ArticleCard key={post.slug} post={post} index={index} />
         ))}
       </div>
     </div>

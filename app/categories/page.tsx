@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { FadeIn } from "@/components/animated";
+import { TaxonomyDirectory } from "@/components/taxonomy-directory";
 import { pageMetadata } from "@/lib/metadata";
 import { getAllCategories } from "@/lib/posts";
 
@@ -16,29 +15,16 @@ export default function CategoriesPage() {
   const categories = getAllCategories();
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-      <Badge variant="accent">Categories</Badge>
-      <h1 className="mt-4 text-balance text-4xl font-semibold tracking-normal sm:text-5xl">
-        分类
-      </h1>
-      <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
-        按内容类型组织文章，帮助读者先判断阅读目的，再进入对应的文章集合。
-      </p>
-      <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {categories.map((category) => (
-          <Card key={category.slug} className="transition-colors hover:border-accent/60">
-            <Link href={`/categories/${category.slug}`} className="block p-5">
-              <span className="text-lg font-semibold">{category.name}</span>
-              <span className="mt-2 block text-sm text-muted-foreground">
-                {category.count} 篇文章
-              </span>
-              <span className="mt-4 block text-sm leading-6 text-muted-foreground">
-                {category.description}
-              </span>
-            </Link>
-          </Card>
-        ))}
-      </div>
+    <div className="editorial-shell pb-24 pt-14 sm:pt-20">
+      <FadeIn className="grid gap-8 border-b border-border/80 pb-12 lg:grid-cols-12 lg:items-end">
+        <div className="lg:col-span-8">
+          <p className="editorial-kicker">Content sections</p>
+          <h1 className="display-title mt-6 text-5xl sm:text-7xl">按内容类型浏览</h1>
+          <p className="mt-7 max-w-2xl text-base leading-8 text-muted-foreground">先判断阅读目的，再进入对应的文章集合。分类表达文章承担的任务，标签表达文章讨论的问题。</p>
+        </div>
+        <p className="font-mono text-xs text-muted-foreground lg:col-span-2 lg:col-start-11">{String(categories.length).padStart(2, "0")} SECTIONS</p>
+      </FadeIn>
+      <FadeIn className="pt-10"><TaxonomyDirectory items={categories} basePath="/categories" /></FadeIn>
     </div>
   );
 }

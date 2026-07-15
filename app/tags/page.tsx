@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { FadeIn } from "@/components/animated";
+import { TaxonomyDirectory } from "@/components/taxonomy-directory";
 import { pageMetadata } from "@/lib/metadata";
 import { getAllTags } from "@/lib/posts";
 
@@ -16,27 +15,16 @@ export default function TagsPage() {
   const tags = getAllTags();
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-      <Badge variant="accent">Tags</Badge>
-      <h1 className="mt-4 text-balance text-4xl font-semibold tracking-normal sm:text-5xl">
-        标签
-      </h1>
-      <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
-        按主题聚合文章，保留技术问题之间的上下文关系。每个标签都是一条可继续深入的阅读路径。
-      </p>
-      <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {tags.map((tag) => (
-          <Card key={tag.slug} className="transition-colors hover:border-accent/60">
-            <Link href={`/tags/${tag.slug}`} className="block p-5">
-              <span className="text-lg font-semibold">{tag.name}</span>
-              <span className="mt-2 block text-sm text-muted-foreground">{tag.count} 篇文章</span>
-              <span className="mt-4 block text-sm leading-6 text-muted-foreground">
-                {tag.description}
-              </span>
-            </Link>
-          </Card>
-        ))}
-      </div>
+    <div className="editorial-shell pb-24 pt-14 sm:pt-20">
+      <FadeIn className="grid gap-8 border-b border-border/80 pb-12 lg:grid-cols-12 lg:items-end">
+        <div className="lg:col-span-8">
+          <p className="editorial-kicker">Knowledge index</p>
+          <h1 className="display-title mt-6 text-5xl sm:text-7xl">沿着问题继续阅读</h1>
+          <p className="mt-7 max-w-2xl text-base leading-8 text-muted-foreground">每个标签都是一条可继续深入的阅读路径，用来保留模型、协议与工程问题之间的上下文关系。</p>
+        </div>
+        <p className="font-mono text-xs text-muted-foreground lg:col-span-2 lg:col-start-11">{String(tags.length).padStart(2, "0")} TOPICS</p>
+      </FadeIn>
+      <FadeIn className="pt-10"><TaxonomyDirectory items={tags} basePath="/tags" /></FadeIn>
     </div>
   );
 }

@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preview": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@mdx-js/react": "latest",
@@ -22,7 +24,7 @@
     "katex": "^0.17.0",
     "lucide-react": "latest",
     "motion": "latest",
-    "next": "latest",
+    "next": "16.2.10",
     "next-mdx-remote": "latest",
     "next-themes": "latest",
     "react": "latest",
@@ -43,6 +45,7 @@
     "@types/react-dom": "latest",
     "eslint": "latest",
     "eslint-config-next": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "wrangler": "^4.111.0"
   }
 }

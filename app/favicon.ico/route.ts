@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export const dynamic = "force-static";
+
 export function GET() {
   const favicon = fs.readFileSync(path.join(process.cwd(), "public/favicon.svg"));
 

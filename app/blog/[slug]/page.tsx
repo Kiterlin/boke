@@ -24,6 +24,8 @@ type Props = {
   params: Promise<{ slug: string }>;
 };
 
+export const dynamicParams = false;
+
 export async function generateStaticParams() {
   return getAllPosts().map((post) => ({ slug: post.slug }));
 }
@@ -80,10 +82,10 @@ export default async function PostPage({ params }: Props) {
     <>
       <ReadingProgress />
 
-      <article className="mx-auto max-w-6xl px-4 pb-16 pt-8 sm:px-6 sm:pt-10 lg:px-8">
+      <article className="editorial-shell pb-24 pt-8 sm:pt-12">
         {/* Back link */}
-        <div className="mb-10">
-          <Button asChild variant="ghost" size="sm" className="-ml-2.5 gap-1.5 text-muted-foreground hover:text-foreground">
+        <div className="mb-12 border-b border-border/80 pb-5">
+          <Button asChild variant="ghost" size="sm" className="-ml-3 gap-1.5 text-muted-foreground hover:text-foreground">
             <Link href="/blog">
               <ArrowLeft className="size-3.5" />
               文章列表
@@ -91,13 +93,13 @@ export default async function PostPage({ params }: Props) {
           </Button>
         </div>
 
-        <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_240px] lg:justify-between">
+        <div className="grid gap-14 lg:grid-cols-[minmax(0,1fr)_260px] lg:justify-between">
           {/* Main content */}
-          <div className="min-w-0 max-w-[760px]">
+          <div className="min-w-0 max-w-[780px]">
             {/* ── Header ── */}
-            <header className="mb-12">
+            <header className="mb-14">
               {/* Category + meta row */}
-              <div className="flex flex-wrap items-center gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-wide">
                 <Link href={categoryHref(post.category)}>
                   <Badge variant="accent" className="px-2.5 py-0.5 text-xs font-medium">
                     {post.category}
@@ -120,17 +122,17 @@ export default async function PostPage({ params }: Props) {
               </div>
 
               {/* Title */}
-              <h1 className="mt-6 text-balance text-3xl font-bold leading-tight tracking-tight text-foreground sm:text-4xl sm:leading-tight">
+              <h1 className="display-title mt-7 text-4xl leading-[1.12] text-foreground sm:text-5xl lg:text-6xl">
                 {post.title}
               </h1>
 
               {/* Description / Abstract */}
-              <p className="mt-4 max-w-[68ch] text-lg leading-8 text-muted-foreground">
+              <p className="mt-6 max-w-[62ch] text-lg leading-8 text-muted-foreground">
                 {post.description}
               </p>
 
               {/* Author + updated */}
-              <div className="mt-5 flex flex-wrap items-center gap-4 text-sm">
+              <div className="mt-7 flex flex-wrap items-center gap-4 border-t border-border/80 pt-5 text-sm">
                 <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                   <User className="size-3.5" />
                   {post.author}
@@ -144,7 +146,7 @@ export default async function PostPage({ params }: Props) {
               </div>
 
               {/* Tags */}
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-5 flex flex-wrap gap-2">
                 {post.tags.map((tag) => (
                   <TaxonomyLink key={tag} label={`#${tag}`} href={tagHref(tag)} />
                 ))}
@@ -153,11 +155,11 @@ export default async function PostPage({ params }: Props) {
 
             {/* ── TL;DR + Audience + Takeaways card ── */}
             {(post.tldr || post.audience.length > 0 || post.takeaways.length > 0) && (
-              <div className="mb-12 rounded-xl border border-border/60 bg-card/50 p-6 sm:p-7">
+              <div className="mb-14 border-y border-border/80 py-7">
                 {post.tldr && (
                   <div className="mb-5">
                     <p className="text-sm leading-7 text-foreground/75">
-                      <span className="mr-2 inline-flex items-center rounded-md bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">
+                      <span className="mr-2 inline-flex items-center border border-accent/30 px-2 py-0.5 font-mono text-[10px] font-semibold text-accent">
                         TL;DR
                       </span>
                       {post.tldr}
@@ -248,7 +250,7 @@ export default async function PostPage({ params }: Props) {
               {previous ? (
                 <Link
                   href={`/blog/${previous.slug}`}
-                  className="group rounded-xl border border-border/60 bg-card/50 p-5 transition-all hover:border-accent/30 hover:shadow-sm"
+                  className="group border-t border-border/80 py-5 transition-colors hover:border-accent"
                 >
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
                     <ArrowLeft className="size-3" /> 上一篇
@@ -263,7 +265,7 @@ export default async function PostPage({ params }: Props) {
               {next ? (
                 <Link
                   href={`/blog/${next.slug}`}
-                  className="group rounded-xl border border-border/60 bg-card/50 p-5 text-right transition-all hover:border-accent/30 hover:shadow-sm"
+                  className="group border-t border-border/80 py-5 text-right transition-colors hover:border-accent"
                 >
                   <span className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
                     下一篇 <ArrowRight className="size-3" />

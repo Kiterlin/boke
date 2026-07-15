@@ -3,6 +3,8 @@ import type { MetadataRoute } from "next";
 import { getAllCategories, getAllPosts, getAllTags } from "@/lib/posts";
 import { siteConfig } from "@/lib/site";
 
+export const dynamic = "force-static";
+
 export default function sitemap(): MetadataRoute.Sitemap {
   const staticRoutes = [
     "",

@@ -17,3 +17,10 @@ pnpm-debug.log*
 .codex/
 .vercel/
 .vercel
+
+# Cloudflare Workers
+.wrangler/
+.open-next/
+
+# Keep the private source portrait local; the sanitized web copy is public/profile/.
+/docs/mmexport1693283172898(1).jpg

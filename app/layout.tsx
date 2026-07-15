@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, JetBrains_Mono, Noto_Sans_SC } from "next/font/google";
+import { Geist, JetBrains_Mono, Noto_Sans_SC, Noto_Serif_SC } from "next/font/google";
 import "katex/dist/katex.min.css";
 
 import "./globals.css";
@@ -20,6 +20,13 @@ const notoSansSc = Noto_Sans_SC({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-noto-sans-sc",
+  display: "swap"
+});
+
+const notoSerifSc = Noto_Serif_SC({
+  subsets: ["latin"],
+  weight: ["600", "700"],
+  variable: "--font-noto-serif-sc",
   display: "swap"
 });
 
@@ -54,7 +61,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${notoSansSc.variable} ${jetBrainsMono.variable} font-sans antialiased`}
+        className={`${geistSans.variable} ${notoSansSc.variable} ${notoSerifSc.variable} ${jetBrainsMono.variable} font-sans antialiased`}
       >
         <a href="#content" className="skip-link">
           跳到正文

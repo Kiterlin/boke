@@ -1,12 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ArticleCard } from "@/components/article-card";
 import { Input } from "@/components/ui/input";
 import type { Post } from "@/lib/posts";
-import { formatDate } from "@/lib/utils";
 
 export function SearchClient({ posts }: { posts: Post[] }) {
   const [query, setQuery] = useState("");
@@ -40,31 +39,18 @@ export function SearchClient({ posts }: { posts: Post[] }) {
         />
       </div>
 
-      <div className="grid gap-3">
-        <p className="text-sm text-muted-foreground">
+      <div>
+        <p className="mb-5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           {normalized ? `找到 ${results.length} 篇相关文章` : `共 ${posts.length} 篇文章`}
         </p>
-        {results.map((post) => (
-          <Link
-            key={post.slug}
-            href={`/blog/${post.slug}`}
-            className="group rounded-md border bg-card p-5 transition-colors hover:border-accent/60"
-          >
-            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-              <span>{post.category}</span>
-              <span className="h-px w-4 bg-border" />
-              <time dateTime={post.date}>{formatDate(post.date)}</time>
-              <span className="h-px w-4 bg-border" />
-              <span>{post.readingTime}</span>
-            </div>
-            <h2 className="mt-3 text-xl font-semibold tracking-normal group-hover:text-accent">
-              {post.title}
-            </h2>
-            <p className="mt-2 line-clamp-2 text-sm leading-7 text-muted-foreground">
-              {post.description}
-            </p>
-          </Link>
-        ))}
+        {results.length > 0 ? results.map((post, index) => (
+          <ArticleCard key={post.slug} post={post} index={index} />
+        )) : (
+          <div className="border-y border-border/80 py-14">
+            <p className="section-title text-2xl">没有匹配的文章</p>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">换一个更短的关键词，或尝试搜索分类名称和技术缩写。</p>
+          </div>
+        )}
       </div>
     </div>
   );

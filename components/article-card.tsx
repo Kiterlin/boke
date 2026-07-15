@@ -1,48 +1,47 @@
 import Link from "next/link";
-import { Clock } from "lucide-react";
+import { ArrowUpRight, Clock } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import type { Post } from "@/lib/posts";
 import { formatDate, slugify } from "@/lib/utils";
 
-export function ArticleCard({ post, featured = false }: { post: Post; featured?: boolean }) {
+export function ArticleCard({
+  post,
+  featured = false,
+  index
+}: {
+  post: Post;
+  featured?: boolean;
+  index?: number;
+}) {
   return (
-    <Card className="group h-full overflow-hidden transition-colors hover:border-accent/55">
-      <Link href={`/blog/${post.slug}`} className="flex h-full flex-col p-5 sm:p-6">
-        <div className="mb-5 flex flex-wrap items-center gap-3">
-          <Badge variant={featured ? "accent" : "secondary"}>{post.category}</Badge>
-          <span className="text-xs text-muted-foreground">
-            <time dateTime={post.date}>{formatDate(post.date)}</time>
+    <article className="group border-t border-border/80 transition-colors hover:border-accent">
+      <Link href={`/blog/${post.slug}`} className="grid gap-5 py-7 sm:grid-cols-12 sm:items-start sm:py-8">
+        <div className="flex items-center justify-between sm:col-span-2 sm:block">
+          <span className="font-mono text-xs text-muted-foreground">
+            {typeof index === "number" ? String(index + 1).padStart(2, "0") : formatDate(post.date)}
           </span>
+          <Badge variant={featured ? "accent" : "outline"} className="sm:mt-5">
+            {post.category}
+          </Badge>
         </div>
-        <h3 className="text-balance text-xl font-semibold leading-tight tracking-normal sm:text-2xl">
-          {post.title}
-        </h3>
-        <p className="mt-4 line-clamp-3 text-sm leading-7 text-muted-foreground">
-          {post.description}
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          {post.tags.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-sm border bg-background px-2 py-1 text-xs text-muted-foreground"
-            >
-              #{tag}
-            </span>
-          ))}
+        <div className="sm:col-span-7">
+          <h3 className="section-title text-balance text-xl leading-snug transition-colors group-hover:text-accent sm:text-2xl">
+            {post.title}
+          </h3>
+          <p className="mt-3 line-clamp-2 max-w-2xl text-sm leading-7 text-muted-foreground">
+            {post.description}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+            {post.tags.slice(0, 3).map((tag) => <span key={tag}>#{tag}</span>)}
+          </div>
         </div>
-        <div className="mt-auto flex items-center justify-between gap-3 pt-7 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <Clock className="size-3.5" />
-            {post.readingTime}
-          </span>
-          <span className="font-medium text-foreground underline decoration-border underline-offset-4 transition-colors group-hover:decoration-accent">
-            阅读
-          </span>
+        <div className="flex items-center justify-between text-xs text-muted-foreground sm:col-span-3 sm:justify-end sm:gap-8">
+          <span className="inline-flex items-center gap-1.5"><Clock className="size-3.5" />{post.readingTime}</span>
+          <ArrowUpRight className="size-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
         </div>
       </Link>
-    </Card>
+    </article>
   );
 }
 

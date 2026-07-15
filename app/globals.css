@@ -8,6 +8,8 @@
     BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo,
     Monaco, Consolas, "Liberation Mono", monospace;
+  --font-serif: var(--font-noto-serif-sc), "Songti SC", "STSong", Georgia,
+    serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -33,46 +35,46 @@
 }
 
 :root {
-  --radius: 0.875rem;
-  --background: oklch(0.99 0.002 96);
-  --foreground: oklch(0.17 0.004 96);
-  --card: oklch(0.985 0.002 96);
-  --card-foreground: oklch(0.17 0.004 96);
-  --popover: oklch(0.995 0.002 96);
-  --popover-foreground: oklch(0.17 0.004 96);
-  --primary: oklch(0.18 0.004 96);
-  --primary-foreground: oklch(0.99 0.002 96);
-  --secondary: oklch(0.955 0.003 96);
-  --secondary-foreground: oklch(0.22 0.004 96);
-  --muted: oklch(0.95 0.003 96);
-  --muted-foreground: oklch(0.47 0.005 96);
-  --accent: oklch(0.55 0.075 165);
-  --accent-foreground: oklch(0.99 0.002 96);
+  --radius: 0.5rem;
+  --background: oklch(0.975 0.012 84);
+  --foreground: oklch(0.19 0.018 72);
+  --card: oklch(0.988 0.008 84);
+  --card-foreground: oklch(0.19 0.018 72);
+  --popover: oklch(0.99 0.008 84);
+  --popover-foreground: oklch(0.19 0.018 72);
+  --primary: oklch(0.2 0.018 72);
+  --primary-foreground: oklch(0.975 0.012 84);
+  --secondary: oklch(0.925 0.018 84);
+  --secondary-foreground: oklch(0.25 0.018 72);
+  --muted: oklch(0.93 0.014 84);
+  --muted-foreground: oklch(0.46 0.025 72);
+  --accent: oklch(0.47 0.085 157);
+  --accent-foreground: oklch(0.98 0.01 84);
   --destructive: oklch(0.52 0.17 28);
-  --border: oklch(0.89 0.004 96);
-  --input: oklch(0.88 0.004 96);
-  --ring: oklch(0.55 0.075 165);
+  --border: oklch(0.83 0.02 82);
+  --input: oklch(0.81 0.02 82);
+  --ring: oklch(0.47 0.085 157);
 }
 
 .dark {
-  --background: oklch(0.145 0.003 96);
-  --foreground: oklch(0.93 0.003 96);
-  --card: oklch(0.19 0.004 96);
-  --card-foreground: oklch(0.93 0.003 96);
-  --popover: oklch(0.19 0.004 96);
-  --popover-foreground: oklch(0.93 0.003 96);
-  --primary: oklch(0.92 0.003 96);
-  --primary-foreground: oklch(0.15 0.003 96);
-  --secondary: oklch(0.24 0.004 96);
-  --secondary-foreground: oklch(0.92 0.003 96);
-  --muted: oklch(0.24 0.004 96);
-  --muted-foreground: oklch(0.69 0.004 96);
-  --accent: oklch(0.67 0.082 165);
-  --accent-foreground: oklch(0.13 0.018 165);
+  --background: oklch(0.145 0.012 72);
+  --foreground: oklch(0.91 0.014 84);
+  --card: oklch(0.18 0.014 72);
+  --card-foreground: oklch(0.91 0.014 84);
+  --popover: oklch(0.18 0.014 72);
+  --popover-foreground: oklch(0.91 0.014 84);
+  --primary: oklch(0.91 0.014 84);
+  --primary-foreground: oklch(0.15 0.012 72);
+  --secondary: oklch(0.23 0.018 72);
+  --secondary-foreground: oklch(0.9 0.014 84);
+  --muted: oklch(0.23 0.018 72);
+  --muted-foreground: oklch(0.68 0.025 84);
+  --accent: oklch(0.65 0.082 157);
+  --accent-foreground: oklch(0.15 0.025 157);
   --destructive: oklch(0.62 0.16 28);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.65 0.075 155);
+  --ring: oklch(0.65 0.082 157);
 }
 
 * {
@@ -95,11 +97,8 @@ body {
   min-height: 100dvh;
   overflow-x: clip;
   background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--background) 94%, var(--secondary)) 0%,
-      var(--background) 36rem
-    );
+    radial-gradient(circle at 82% 4%, color-mix(in oklab, var(--accent) 6%, transparent), transparent 28rem),
+    linear-gradient(180deg, color-mix(in oklab, var(--background) 92%, var(--secondary)) 0%, var(--background) 42rem);
   color: var(--foreground);
   font-family: var(--font-sans);
   font-feature-settings: "rlig" 1, "calt" 1;
@@ -115,11 +114,124 @@ body::before {
   pointer-events: none;
   content: "";
   background-image:
-    radial-gradient(color-mix(in oklab, var(--foreground) 10%, transparent) 1px, transparent 1px),
-    linear-gradient(180deg, transparent, color-mix(in oklab, var(--secondary) 34%, transparent));
-  background-size: 1.125rem 1.125rem, 100% 100%;
+    radial-gradient(color-mix(in oklab, var(--foreground) 14%, transparent) 0.6px, transparent 0.6px),
+    linear-gradient(90deg, transparent 49.9%, color-mix(in oklab, var(--border) 24%, transparent) 50%, transparent 50.1%);
+  background-size: 0.25rem 0.25rem, min(100%, 90rem) 100%;
   mask-image: linear-gradient(to bottom, black, transparent 40rem);
-  opacity: 0.42;
+  opacity: 0.28;
+}
+
+a,
+button,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(a, button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.editorial-shell {
+  width: min(100% - 2rem, 80rem);
+  margin-inline: auto;
+}
+
+.editorial-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.editorial-kicker::before {
+  width: 1.75rem;
+  height: 1px;
+  content: "";
+  background: var(--accent);
+}
+
+.display-title {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.section-title {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.editorial-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--foreground) 36%, transparent);
+  padding-bottom: 0.22rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: border-color 180ms ease, color 180ms ease, gap 180ms ease;
+}
+
+.editorial-link:hover {
+  gap: 0.9rem;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.portrait-frame {
+  position: relative;
+  isolation: isolate;
+  min-height: 34rem;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, color-mix(in oklab, var(--secondary) 82%, var(--accent)), var(--primary));
+}
+
+.portrait-frame::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  content: "";
+  background-image: url("/profile/sun-lupeng.jpg");
+  background-position: center 28%;
+  background-size: cover;
+  filter: saturate(0.74) contrast(1.04);
+}
+
+.portrait-frame::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(180deg, transparent 55%, oklch(0.12 0.01 72 / 72%)),
+    repeating-linear-gradient(90deg, transparent 0 24.8%, oklch(1 0 0 / 7%) 25% 25.15%);
+}
+
+.portrait-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-serif);
+  font-size: clamp(5rem, 14vw, 10rem);
+  color: color-mix(in oklab, var(--primary-foreground) 20%, transparent);
+}
+
+@media (min-width: 640px) {
+  .editorial-shell {
+    width: min(100% - 3rem, 80rem);
+  }
 }
 
 ::selection {

@@ -1,7 +1,7 @@
 "use client";
 
-import { motion } from "motion/react";
-import type { ReactNode } from "react";
+import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
+import { useRef, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -14,13 +14,40 @@ export function FadeIn({
   className?: string;
   delay?: number;
 }) {
+  const reduceMotion = useReducedMotion();
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1], delay }}
+      initial={reduceMotion ? false : { opacity: 0, y: 24 }}
+      whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-8% 0px" }}
+      transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1], delay }}
       className={cn(className)}
     >
+      {children}
+    </motion.div>
+  );
+}
+
+export function ParallaxMedia({
+  children,
+  className,
+  distance = 44
+}: {
+  children: ReactNode;
+  className?: string;
+  distance?: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ["start end", "end start"]
+  });
+  const y = useTransform(scrollYProgress, [0, 1], [distance, -distance]);
+
+  return (
+    <motion.div ref={ref} style={reduceMotion ? undefined : { y }} className={className}>
       {children}
     </motion.div>
   );
